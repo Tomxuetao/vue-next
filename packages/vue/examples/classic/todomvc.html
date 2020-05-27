@@ -82,14 +82,14 @@ const filters = {
   }
 }
 
-Vue.createApp({
+const App = {
   // app initial state
-  data: () => ({
+  data: {
     todos: todoStorage.fetch(),
     newTodo: '',
     editedTodo: null,
     visibility: 'all'
-  }),
+  },
 
   // watch todos change for localStorage persistence
   watch: {
@@ -192,5 +192,7 @@ Vue.createApp({
       }
     }
   }
-}).mount('#app')
+}
+
+Vue.createApp().mount(App, '#app')
 </script>

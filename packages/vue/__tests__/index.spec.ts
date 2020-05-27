@@ -1,5 +1,5 @@
 import { createApp } from '../src'
-import { mockWarn } from '@vue/shared'
+import { mockWarn } from '@vue/runtime-test'
 
 describe('compiler + runtime integration', () => {
   mockWarn()
@@ -14,7 +14,7 @@ describe('compiler + runtime integration', () => {
         }
       }
     }
-    createApp(App).mount(container)
+    createApp().mount(App, container)
     expect(container.innerHTML).toBe(`0`)
   })
 
@@ -33,7 +33,7 @@ describe('compiler + runtime integration', () => {
         }
       }
     }
-    createApp(App).mount(container)
+    createApp().mount(App, container)
     expect(container.innerHTML).toBe(`0`)
   })
 
@@ -51,7 +51,7 @@ describe('compiler + runtime integration', () => {
         }
       }
     }
-    createApp(App).mount(container)
+    createApp().mount(App, container)
     expect(container.innerHTML).toBe(`0`)
   })
 
@@ -60,7 +60,7 @@ describe('compiler + runtime integration', () => {
     const App = {
       template: `<div v-if>`
     }
-    createApp(App).mount(container)
+    createApp().mount(App, container)
     expect(
       `Template compilation error: Element is missing end tag`
     ).toHaveBeenWarned()
@@ -78,24 +78,26 @@ describe('compiler + runtime integration', () => {
   })
 
   it('should support custom element', () => {
-    const app = createApp({
-      template: '<custom></custom>'
-    })
+    const app = createApp()
     const container = document.createElement('div')
+    const App = {
+      template: '<custom></custom>'
+    }
     app.config.isCustomElement = tag => tag === 'custom'
-    app.mount(container)
+    app.mount(App, container)
     expect(container.innerHTML).toBe('<custom></custom>')
   })
 
   it('should support using element innerHTML as template', () => {
-    const app = createApp({
-      data: () => ({
-        msg: 'hello'
-      })
-    })
+    const app = createApp()
     const container = document.createElement('div')
     container.innerHTML = '{{msg}}'
-    app.mount(container)
+    const App = {
+      data: {
+        msg: 'hello'
+      }
+    }
+    app.mount(App, container)
     expect(container.innerHTML).toBe('hello')
   })
 })

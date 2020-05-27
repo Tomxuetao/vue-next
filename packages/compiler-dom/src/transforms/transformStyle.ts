@@ -1,11 +1,8 @@
 import {
   NodeTransform,
   NodeTypes,
-  createSimpleExpression,
-  SimpleExpressionNode,
-  SourceLocation
+  createSimpleExpression
 } from '@vue/compiler-core'
-import { parseStringStyle } from '@vue/shared'
 
 // Parse inline CSS strings for static style attributes into an object.
 // This is a NodeTransform since it works on the static `style` attribute and
@@ -18,11 +15,13 @@ export const transformStyle: NodeTransform = (node, context) => {
     node.props.forEach((p, i) => {
       if (p.type === NodeTypes.ATTRIBUTE && p.name === 'style' && p.value) {
         // replace p with an expression node
+        const parsed = JSON.stringify(parseInlineCSS(p.value.content))
+        const exp = context.hoist(createSimpleExpression(parsed, false, p.loc))
         node.props[i] = {
           type: NodeTypes.DIRECTIVE,
           name: `bind`,
           arg: createSimpleExpression(`style`, true, p.loc),
-          exp: parseInlineCSS(p.value.content, p.loc),
+          exp,
           modifiers: [],
           loc: p.loc
         }
@@ -31,10 +30,16 @@ export const transformStyle: NodeTransform = (node, context) => {
   }
 }
 
-const parseInlineCSS = (
-  cssText: string,
-  loc: SourceLocation
-): SimpleExpressionNode => {
-  const normalized = parseStringStyle(cssText)
-  return createSimpleExpression(JSON.stringify(normalized), false, loc, true)
+const listDelimiterRE = /;(?![^(]*\))/g
+const propertyDelimiterRE = /:(.+)/
+
+function parseInlineCSS(cssText: string): Record<string, string> {
+  const res: Record<string, string> = {}
+  cssText.split(listDelimiterRE).forEach(item => {
+    if (item) {
+      const tmp = item.split(propertyDelimiterRE)
+      tmp.length > 1 && (res[tmp[0].trim()] = tmp[1].trim())
+    }
+  })
+  return res
 }

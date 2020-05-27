@@ -1,103 +1,52 @@
 import { VNode, VNodeChild, isVNode } from './vnode'
+import { ReactiveEffect, reactive, shallowReadonly } from '@vue/reactivity'
 import {
-  reactive,
-  ReactiveEffect,
-  pauseTracking,
-  resetTracking,
-  shallowReadonly
-} from '@vue/reactivity'
-import {
-  ComponentPublicInstance,
   PublicInstanceProxyHandlers,
-  RuntimeCompiledPublicInstanceProxyHandlers,
-  createRenderContext,
-  exposePropsOnRenderContext,
-  exposeSetupStateOnRenderContext
+  ComponentPublicInstance,
+  runtimeCompiledRenderProxyHandlers
 } from './componentProxy'
-import { ComponentPropsOptions, initProps } from './componentProps'
-import { Slots, initSlots, InternalSlots } from './componentSlots'
+import { ComponentPropsOptions } from './componentProps'
+import { Slots } from './componentSlots'
 import { warn } from './warning'
-import { ErrorCodes, callWithErrorHandling } from './errorHandling'
+import {
+  ErrorCodes,
+  callWithErrorHandling,
+  callWithAsyncErrorHandling
+} from './errorHandling'
 import { AppContext, createAppContext, AppConfig } from './apiCreateApp'
 import { Directive, validateDirectiveName } from './directives'
-import { applyOptions, ComponentOptions } from './componentOptions'
-import {
-  EmitsOptions,
-  ObjectEmitsOptions,
-  EmitFn,
-  emit
-} from './componentEmits'
+import { applyOptions, ComponentOptions } from './apiOptions'
 import {
   EMPTY_OBJ,
   isFunction,
+  capitalize,
   NOOP,
   isObject,
   NO,
   makeMap,
-  isPromise,
-  ShapeFlags
+  isPromise
 } from '@vue/shared'
 import { SuspenseBoundary } from './components/Suspense'
 import { CompilerOptions } from '@vue/compiler-core'
-import {
-  currentRenderingInstance,
-  markAttrsAccessed
-} from './componentRenderUtils'
-import { startMeasure, endMeasure } from './profiling'
+import { currentRenderingInstance } from './componentRenderUtils'
 
 export type Data = { [key: string]: unknown }
 
-// Note: can't mark this whole interface internal because some public interfaces
-// extend it.
 export interface SFCInternalOptions {
-  /**
-   * @internal
-   */
   __scopeId?: string
-  /**
-   * @internal
-   */
   __cssModules?: Data
-  /**
-   * @internal
-   */
   __hmrId?: string
-  /**
-   * @internal
-   */
   __hmrUpdated?: boolean
-  /**
-   * This one should be exposed so that devtools can make use of it
-   */
-  __file?: string
 }
 
-export interface FunctionalComponent<
-  P = {},
-  E extends EmitsOptions = Record<string, any>
-> extends SFCInternalOptions {
-  // use of any here is intentional so it can be a valid JSX Element constructor
-  (props: P, ctx: SetupContext<E>): any
+export interface FunctionalComponent<P = {}> extends SFCInternalOptions {
+  (props: P, ctx: SetupContext): VNodeChild
   props?: ComponentPropsOptions<P>
-  emits?: E | (keyof E)[]
   inheritAttrs?: boolean
-  inheritRef?: boolean
   displayName?: string
 }
 
-export interface ClassComponent {
-  new (...args: any[]): ComponentPublicInstance<any, any, any, any, any>
-  __vccOpts: ComponentOptions
-}
-
-export type Component = ComponentOptions | FunctionalComponent<any>
-
-// A type used in public APIs where a component type is expected.
-// The constructor type is an artificial type returned by defineComponent().
-export type PublicAPIComponent =
-  | Component
-  | { new (...args: any[]): ComponentPublicInstance<any, any, any, any, any> }
-
+export type Component = ComponentOptions | FunctionalComponent
 export { ComponentOptions }
 
 type LifecycleHook = Function[] | null
@@ -118,252 +67,134 @@ export const enum LifecycleHooks {
   ERROR_CAPTURED = 'ec'
 }
 
-export interface SetupContext<E = ObjectEmitsOptions> {
+export type Emit = (event: string, ...args: unknown[]) => void
+
+export interface SetupContext {
   attrs: Data
   slots: Slots
-  emit: EmitFn<E>
+  emit: Emit
 }
 
-/**
- * @internal
- */
-export type InternalRenderFunction = {
-  (
-    ctx: ComponentPublicInstance,
-    cache: ComponentInternalInstance['renderCache']
-  ): VNodeChild
-  _rc?: boolean // isRuntimeCompiled
+export type RenderFunction = {
+  (): VNodeChild
+  isRuntimeCompiled?: boolean
 }
 
-/**
- * We expose a subset of properties on the internal instance as they are
- * useful for advanced external libraries and tools.
- */
 export interface ComponentInternalInstance {
-  uid: number
-  type: Component
+  type: FunctionalComponent | ComponentOptions
   parent: ComponentInternalInstance | null
-  root: ComponentInternalInstance
   appContext: AppContext
-  /**
-   * Vnode representing this component in its parent's vdom tree
-   */
+  root: ComponentInternalInstance
   vnode: VNode
-  /**
-   * The pending new vnode from parent updates
-   * @internal
-   */
   next: VNode | null
-  /**
-   * Root vnode of this component's own vdom tree
-   */
   subTree: VNode
-  /**
-   * The reactive effect for rendering and patching the component. Callable.
-   */
   update: ReactiveEffect
-  /**
-   * The render function that returns vdom tree.
-   * @internal
-   */
-  render: InternalRenderFunction | null
-  /**
-   * Object containing values this component provides for its descendents
-   * @internal
-   */
-  provides: Data
-  /**
-   * Tracking reactive effects (e.g. watchers) associated with this component
-   * so that they can be automatically stopped on component unmount
-   * @internal
-   */
+  render: RenderFunction | null
   effects: ReactiveEffect[] | null
-  /**
-   * cache for proxy access type to avoid hasOwnProperty calls
-   * @internal
-   */
+  provides: Data
+  // cache for proxy access type to avoid hasOwnProperty calls
   accessCache: Data | null
-  /**
-   * cache for render function values that rely on _ctx but won't need updates
-   * after initialized (e.g. inline handlers)
-   * @internal
-   */
-  renderCache: (Function | VNode)[]
+  // cache for render function values that rely on _ctx but won't need updates
+  // after initialized (e.g. inline handlers)
+  renderCache: (Function | VNode)[] | null
 
-  /**
-   * Asset hashes that prototypally inherits app-level asset hashes for fast
-   * resolution
-   * @internal
-   */
+  // assets for fast resolution
   components: Record<string, Component>
-  /**
-   * @internal
-   */
   directives: Record<string, Directive>
 
-  // the rest are only for stateful components ---------------------------------
-
-  // main proxy that serves as the public instance (`this`)
-  proxy: ComponentPublicInstance | null
-
-  /**
-   * alternative proxy used only for runtime-compiled render functions using
-   * `with` block
-   * @internal
-   */
-  withProxy: ComponentPublicInstance | null
-  /**
-   * This is the target for the public instance proxy. It also holds properties
-   * injected by user options (computed, methods etc.) and user-attached
-   * custom properties (via `this.x = ...`)
-   * @internal
-   */
-  ctx: Data
-
-  // internal state
+  // the rest are only for stateful components
+  renderContext: Data
   data: Data
   props: Data
   attrs: Data
-  slots: InternalSlots
-  refs: Data
-  emit: EmitFn
-
-  /**
-   * setup related
-   * @internal
-   */
-  setupState: Data
-  /**
-   * @internal
-   */
+  slots: Slots
+  proxy: ComponentPublicInstance | null
+  // alternative proxy used only for runtime-compiled render functions using
+  // `with` block
+  withProxy: ComponentPublicInstance | null
+  propsProxy: Data | null
   setupContext: SetupContext | null
+  refs: Data
+  emit: Emit
 
-  /**
-   * suspense related
-   * @internal
-   */
-  suspense: SuspenseBoundary | null
-  /**
-   * @internal
-   */
+  // suspense related
   asyncDep: Promise<any> | null
-  /**
-   * @internal
-   */
+  asyncResult: unknown
   asyncResolved: boolean
+
+  // storage for any extra properties
+  sink: { [key: string]: any }
 
   // lifecycle
   isMounted: boolean
   isUnmounted: boolean
   isDeactivated: boolean
-  /**
-   * @internal
-   */
   [LifecycleHooks.BEFORE_CREATE]: LifecycleHook
-  /**
-   * @internal
-   */
   [LifecycleHooks.CREATED]: LifecycleHook
-  /**
-   * @internal
-   */
   [LifecycleHooks.BEFORE_MOUNT]: LifecycleHook
-  /**
-   * @internal
-   */
   [LifecycleHooks.MOUNTED]: LifecycleHook
-  /**
-   * @internal
-   */
   [LifecycleHooks.BEFORE_UPDATE]: LifecycleHook
-  /**
-   * @internal
-   */
   [LifecycleHooks.UPDATED]: LifecycleHook
-  /**
-   * @internal
-   */
   [LifecycleHooks.BEFORE_UNMOUNT]: LifecycleHook
-  /**
-   * @internal
-   */
   [LifecycleHooks.UNMOUNTED]: LifecycleHook
-  /**
-   * @internal
-   */
   [LifecycleHooks.RENDER_TRACKED]: LifecycleHook
-  /**
-   * @internal
-   */
   [LifecycleHooks.RENDER_TRIGGERED]: LifecycleHook
-  /**
-   * @internal
-   */
   [LifecycleHooks.ACTIVATED]: LifecycleHook
-  /**
-   * @internal
-   */
   [LifecycleHooks.DEACTIVATED]: LifecycleHook
-  /**
-   * @internal
-   */
   [LifecycleHooks.ERROR_CAPTURED]: LifecycleHook
 
-  /**
-   * hmr marker (dev only)
-   * @internal
-   */
+  // hmr marker (dev only)
   renderUpdated?: boolean
 }
 
 const emptyAppContext = createAppContext()
 
-let uid = 0
-
-export function createComponentInstance(
+export function defineComponentInstance(
   vnode: VNode,
-  parent: ComponentInternalInstance | null,
-  suspense: SuspenseBoundary | null
+  parent: ComponentInternalInstance | null
 ) {
   // inherit parent app context - or - if root, adopt from root vnode
   const appContext =
     (parent ? parent.appContext : vnode.appContext) || emptyAppContext
   const instance: ComponentInternalInstance = {
-    uid: uid++,
     vnode,
     parent,
     appContext,
     type: vnode.type as Component,
-    root: null!, // to be immediately set
+    root: null!, // set later so it can point to itself
     next: null,
     subTree: null!, // will be set synchronously right after creation
     update: null!, // will be set synchronously right after creation
     render: null,
     proxy: null,
     withProxy: null,
+    propsProxy: null,
+    setupContext: null,
     effects: null,
     provides: parent ? parent.provides : Object.create(appContext.provides),
     accessCache: null!,
-    renderCache: [],
+    renderCache: null,
 
-    // state
-    ctx: EMPTY_OBJ,
+    // setup context properties
+    renderContext: EMPTY_OBJ,
     data: EMPTY_OBJ,
     props: EMPTY_OBJ,
     attrs: EMPTY_OBJ,
     slots: EMPTY_OBJ,
     refs: EMPTY_OBJ,
-    setupState: EMPTY_OBJ,
-    setupContext: null,
 
     // per-instance asset storage (mutable during options resolution)
     components: Object.create(appContext.components),
     directives: Object.create(appContext.directives),
 
-    // suspense related
-    suspense,
+    // async dependency management
     asyncDep: null,
+    asyncResult: null,
     asyncResolved: false,
+
+    // user namespace for storing whatever the user assigns to `this`
+    // can also be used as a wildcard storage for ad-hoc injections internally
+    sink: {},
 
     // lifecycle hooks
     // not using enums here because it results in computed properties
@@ -383,19 +214,27 @@ export function createComponentInstance(
     rtg: null,
     rtc: null,
     ec: null,
-    emit: null as any // to be set immediately
+
+    emit: (event, ...args) => {
+      const props = instance.vnode.props || EMPTY_OBJ
+      const handler = props[`on${event}`] || props[`on${capitalize(event)}`]
+      if (handler) {
+        callWithAsyncErrorHandling(
+          handler,
+          instance,
+          ErrorCodes.COMPONENT_EVENT_HANDLER,
+          args
+        )
+      }
+    }
   }
-  if (__DEV__) {
-    instance.ctx = createRenderContext(instance)
-  } else {
-    instance.ctx = { _: instance }
-  }
+
   instance.root = parent ? parent.root : instance
-  instance.emit = emit.bind(null, instance)
   return instance
 }
 
 export let currentInstance: ComponentInternalInstance | null = null
+export let currentSuspense: SuspenseBoundary | null = null
 
 export const getCurrentInstance: () => ComponentInternalInstance | null = () =>
   currentInstance || currentRenderingInstance
@@ -417,29 +256,9 @@ export function validateComponentName(name: string, config: AppConfig) {
   }
 }
 
-export let isInSSRComponentSetup = false
-
-export function setupComponent(
+export function setupStatefulComponent(
   instance: ComponentInternalInstance,
-  isSSR = false
-) {
-  isInSSRComponentSetup = isSSR
-
-  const { props, children, shapeFlag } = instance.vnode
-  const isStateful = shapeFlag & ShapeFlags.STATEFUL_COMPONENT
-  initProps(instance, props, isStateful, isSSR)
-  initSlots(instance, children)
-
-  const setupResult = isStateful
-    ? setupStatefulComponent(instance, isSSR)
-    : undefined
-  isInSSRComponentSetup = false
-  return setupResult
-}
-
-function setupStatefulComponent(
-  instance: ComponentInternalInstance,
-  isSSR: boolean
+  parentSuspense: SuspenseBoundary | null
 ) {
   const Component = instance.type as ComponentOptions
 
@@ -463,35 +282,30 @@ function setupStatefulComponent(
   // 0. create render proxy property access cache
   instance.accessCache = {}
   // 1. create public instance / render proxy
-  // also mark it raw so it's never observed
-  instance.proxy = new Proxy(instance.ctx, PublicInstanceProxyHandlers)
-  if (__DEV__) {
-    exposePropsOnRenderContext(instance)
-  }
-  // 2. call setup()
+  instance.proxy = new Proxy(instance, PublicInstanceProxyHandlers)
+  // 2. create props proxy
+  // the propsProxy is a reactive AND readonly proxy to the actual props.
+  // it will be updated in resolveProps() on updates before render
+  const propsProxy = (instance.propsProxy = shallowReadonly(instance.props))
+  // 3. call setup()
   const { setup } = Component
   if (setup) {
     const setupContext = (instance.setupContext =
       setup.length > 1 ? createSetupContext(instance) : null)
 
     currentInstance = instance
-    pauseTracking()
+    currentSuspense = parentSuspense
     const setupResult = callWithErrorHandling(
       setup,
       instance,
       ErrorCodes.SETUP_FUNCTION,
-      [__DEV__ ? shallowReadonly(instance.props) : instance.props, setupContext]
+      [propsProxy, setupContext]
     )
-    resetTracking()
     currentInstance = null
+    currentSuspense = null
 
     if (isPromise(setupResult)) {
-      if (isSSR) {
-        // return the promise so server-renderer can wait on it
-        return setupResult.then((resolvedResult: unknown) => {
-          handleSetupResult(instance, resolvedResult, isSSR)
-        })
-      } else if (__FEATURE_SUSPENSE__) {
+      if (__FEATURE_SUSPENSE__) {
         // async setup returned Promise.
         // bail here and wait for re-entry.
         instance.asyncDep = setupResult
@@ -502,21 +316,21 @@ function setupStatefulComponent(
         )
       }
     } else {
-      handleSetupResult(instance, setupResult, isSSR)
+      handleSetupResult(instance, setupResult, parentSuspense)
     }
   } else {
-    finishComponentSetup(instance, isSSR)
+    finishComponentSetup(instance, parentSuspense)
   }
 }
 
 export function handleSetupResult(
   instance: ComponentInternalInstance,
   setupResult: unknown,
-  isSSR: boolean
+  parentSuspense: SuspenseBoundary | null
 ) {
   if (isFunction(setupResult)) {
     // setup returned an inline render function
-    instance.render = setupResult as InternalRenderFunction
+    instance.render = setupResult as RenderFunction
   } else if (isObject(setupResult)) {
     if (__DEV__ && isVNode(setupResult)) {
       warn(
@@ -526,10 +340,7 @@ export function handleSetupResult(
     }
     // setup returned bindings.
     // assuming a render function compiled from template is present.
-    instance.setupState = reactive(setupResult)
-    if (__DEV__) {
-      exposeSetupStateOnRenderContext(instance)
-    }
+    instance.renderContext = reactive(setupResult)
   } else if (__DEV__ && setupResult !== undefined) {
     warn(
       `setup() should return an object. Received: ${
@@ -537,78 +348,62 @@ export function handleSetupResult(
       }`
     )
   }
-  finishComponentSetup(instance, isSSR)
+  finishComponentSetup(instance, parentSuspense)
 }
 
 type CompileFunction = (
   template: string | object,
   options?: CompilerOptions
-) => InternalRenderFunction
+) => RenderFunction
 
 let compile: CompileFunction | undefined
 
-/**
- * For runtime-dom to register the compiler.
- * Note the exported method uses any to avoid d.ts relying on the compiler types.
- */
+// exported method uses any to avoid d.ts relying on the compiler types.
 export function registerRuntimeCompiler(_compile: any) {
   compile = _compile
 }
 
 function finishComponentSetup(
   instance: ComponentInternalInstance,
-  isSSR: boolean
+  parentSuspense: SuspenseBoundary | null
 ) {
   const Component = instance.type as ComponentOptions
-
-  // template / render function normalization
-  if (__NODE_JS__ && isSSR) {
-    if (Component.render) {
-      instance.render = Component.render as InternalRenderFunction
-    }
-  } else if (!instance.render) {
-    if (compile && Component.template && !Component.render) {
-      if (__DEV__) {
-        startMeasure(instance, `compile`)
-      }
-      Component.render = compile(Component.template, {
+  if (!instance.render) {
+    if (__RUNTIME_COMPILE__ && Component.template && !Component.render) {
+      // __RUNTIME_COMPILE__ ensures `compile` is provided
+      Component.render = compile!(Component.template, {
         isCustomElement: instance.appContext.config.isCustomElement || NO
       })
-      if (__DEV__) {
-        endMeasure(instance, `compile`)
-      }
       // mark the function as runtime compiled
-      ;(Component.render as InternalRenderFunction)._rc = true
+      ;(Component.render as RenderFunction).isRuntimeCompiled = true
     }
 
     if (__DEV__ && !Component.render) {
       /* istanbul ignore if */
-      if (!compile && Component.template) {
+      if (!__RUNTIME_COMPILE__ && Component.template) {
         warn(
-          `Component provided template option but ` +
-            `runtime compilation is not supported in this build of Vue.` +
-            (__ESM_BUNDLER__
-              ? ` Configure your bundler to alias "vue" to "vue/dist/vue.esm-bundler.js".`
-              : __ESM_BROWSER__
-                ? ` Use "vue.esm-browser.js" instead.`
-                : __GLOBAL__
-                  ? ` Use "vue.global.js" instead.`
-                  : ``) /* should not happen */
+          `Component provides template but the build of Vue you are running ` +
+            `does not support runtime template compilation. Either use the ` +
+            `full build or pre-compile the template using Vue CLI.`
         )
       } else {
-        warn(`Component is missing template or render function.`)
+        warn(
+          `Component is missing${
+            __RUNTIME_COMPILE__ ? ` template or` : ``
+          } render function.`
+        )
       }
     }
 
-    instance.render = (Component.render || NOOP) as InternalRenderFunction
+    instance.render = (Component.render || NOOP) as RenderFunction
 
     // for runtime-compiled render functions using `with` blocks, the render
     // proxy used needs a different `has` handler which is more performant and
     // also only allows a whitelist of globals to fallthrough.
-    if (instance.render._rc) {
+    if (__RUNTIME_COMPILE__ && instance.render.isRuntimeCompiled) {
       instance.withProxy = new Proxy(
-        instance.ctx,
-        RuntimeCompiledPublicInstanceProxyHandlers
+        instance,
+        runtimeCompiledRenderProxyHandlers
       )
     }
   }
@@ -616,76 +411,42 @@ function finishComponentSetup(
   // support for 2.x options
   if (__FEATURE_OPTIONS__) {
     currentInstance = instance
+    currentSuspense = parentSuspense
     applyOptions(instance, Component)
     currentInstance = null
+    currentSuspense = null
+  }
+
+  if (instance.renderContext === EMPTY_OBJ) {
+    instance.renderContext = reactive({})
   }
 }
 
-const attrHandlers: ProxyHandler<Data> = {
-  get: (target, key: string) => {
-    if (__DEV__) {
-      markAttrsAccessed()
-    }
-    return target[key]
-  },
-  set: () => {
-    warn(`setupContext.attrs is readonly.`)
-    return false
-  },
-  deleteProperty: () => {
-    warn(`setupContext.attrs is readonly.`)
-    return false
+// used to identify a setup context proxy
+export const SetupProxySymbol = Symbol()
+
+const SetupProxyHandlers: { [key: string]: ProxyHandler<any> } = {}
+;['attrs', 'slots'].forEach((type: string) => {
+  SetupProxyHandlers[type] = {
+    get: (instance, key) => instance[type][key],
+    has: (instance, key) => key === SetupProxySymbol || key in instance[type],
+    ownKeys: instance => Reflect.ownKeys(instance[type]),
+    // this is necessary for ownKeys to work properly
+    getOwnPropertyDescriptor: (instance, key) =>
+      Reflect.getOwnPropertyDescriptor(instance[type], key),
+    set: () => false,
+    deleteProperty: () => false
   }
-}
+})
 
 function createSetupContext(instance: ComponentInternalInstance): SetupContext {
-  if (__DEV__) {
-    // We use getters in dev in case libs like test-utils overwrite instance
-    // properties (overwrites should not be done in prod)
-    return Object.freeze({
-      get attrs() {
-        return new Proxy(instance.attrs, attrHandlers)
-      },
-      get slots() {
-        return shallowReadonly(instance.slots)
-      },
-      get emit() {
-        return (event: string, ...args: any[]) => instance.emit(event, ...args)
-      }
-    })
-  } else {
-    return {
-      attrs: instance.attrs,
-      slots: instance.slots,
-      emit: instance.emit
-    }
+  const context = {
+    // attrs & slots are non-reactive, but they need to always expose
+    // the latest values (instance.xxx may get replaced during updates) so we
+    // need to expose them through a proxy
+    attrs: new Proxy(instance, SetupProxyHandlers.attrs),
+    slots: new Proxy(instance, SetupProxyHandlers.slots),
+    emit: instance.emit
   }
-}
-
-// record effects created during a component's setup() so that they can be
-// stopped when the component unmounts
-export function recordInstanceBoundEffect(effect: ReactiveEffect) {
-  if (currentInstance) {
-    ;(currentInstance.effects || (currentInstance.effects = [])).push(effect)
-  }
-}
-
-const classifyRE = /(?:^|[-_])(\w)/g
-const classify = (str: string): string =>
-  str.replace(classifyRE, c => c.toUpperCase()).replace(/[-_]/g, '')
-
-export function formatComponentName(
-  Component: Component,
-  isRoot = false
-): string {
-  let name = isFunction(Component)
-    ? Component.displayName || Component.name
-    : Component.name
-  if (!name && Component.__file) {
-    const match = Component.__file.match(/([^/\\]+)\.vue$/)
-    if (match) {
-      name = match[1]
-    }
-  }
-  return name ? classify(name) : isRoot ? `App` : `Anonymous`
+  return __DEV__ ? Object.freeze(context) : context
 }

@@ -7,7 +7,11 @@ import {
 } from '../../src'
 import { transformOnce } from '../../src/transforms/vOnce'
 import { transformElement } from '../../src/transforms/transformElement'
-import { RENDER_SLOT, SET_BLOCK_TRACKING } from '../../src/runtimeHelpers'
+import {
+  CREATE_VNODE,
+  RENDER_SLOT,
+  SET_BLOCK_TRACKING
+} from '../../src/runtimeHelpers'
 import { transformBind } from '../../src/transforms/vBind'
 import { transformSlotOutlet } from '../../src/transforms/transformSlotOutlet'
 
@@ -32,8 +36,8 @@ describe('compiler: v-once transform', () => {
       type: NodeTypes.JS_CACHE_EXPRESSION,
       index: 1,
       value: {
-        type: NodeTypes.VNODE_CALL,
-        tag: `"div"`
+        type: NodeTypes.JS_CALL_EXPRESSION,
+        callee: CREATE_VNODE
       }
     })
     expect(generate(root).code).toMatchSnapshot()
@@ -47,8 +51,8 @@ describe('compiler: v-once transform', () => {
       type: NodeTypes.JS_CACHE_EXPRESSION,
       index: 1,
       value: {
-        type: NodeTypes.VNODE_CALL,
-        tag: `"div"`
+        type: NodeTypes.JS_CALL_EXPRESSION,
+        callee: CREATE_VNODE
       }
     })
     expect(generate(root).code).toMatchSnapshot()
@@ -62,8 +66,8 @@ describe('compiler: v-once transform', () => {
       type: NodeTypes.JS_CACHE_EXPRESSION,
       index: 1,
       value: {
-        type: NodeTypes.VNODE_CALL,
-        tag: `_component_Comp`
+        type: NodeTypes.JS_CALL_EXPRESSION,
+        callee: CREATE_VNODE
       }
     })
     expect(generate(root).code).toMatchSnapshot()
@@ -96,8 +100,8 @@ describe('compiler: v-once transform', () => {
       type: NodeTypes.JS_CACHE_EXPRESSION,
       index: 1,
       value: {
-        type: NodeTypes.VNODE_CALL,
-        tag: `"div"`
+        type: NodeTypes.JS_CALL_EXPRESSION,
+        callee: CREATE_VNODE
       }
     })
     expect(generate(root).code).toMatchSnapshot()

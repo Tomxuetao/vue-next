@@ -22,7 +22,7 @@
 </div>
 
 <script>
-const { createApp, ref, watchEffect } = Vue
+const { createApp, ref, watch } = Vue
 const API_URL = `https://api.github.com/repos/vuejs/vue-next/commits?per_page=3&sha=`
 
 const truncate = v => {
@@ -32,12 +32,12 @@ const truncate = v => {
 
 const formatDate = v => v.replace(/T|Z/g, ' ')
 
-createApp({
+const App = {
   setup() {
     const currentBranch = ref('master')
     const commits = ref(null)
 
-    watchEffect(() => {
+    watch(() => {
       fetch(`${API_URL}${currentBranch.value}`)
         .then(res => res.json())
         .then(data => {
@@ -54,7 +54,9 @@ createApp({
       formatDate
     }
   }
-}).mount('#demo')
+}
+
+createApp().mount(App, '#demo')
 </script>
 
 <style>

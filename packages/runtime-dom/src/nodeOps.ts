@@ -1,77 +1,46 @@
-import { RendererOptions } from '@vue/runtime-core'
+const doc = document
+const svgNS = 'http://www.w3.org/2000/svg'
 
-export const svgNS = 'http://www.w3.org/2000/svg'
-
-const doc = (typeof document !== 'undefined' ? document : null) as Document
-
-let tempContainer: HTMLElement
-let tempSVGContainer: SVGElement
-
-export const nodeOps: Omit<RendererOptions<Node, Element>, 'patchProp'> = {
-  insert: (child, parent, anchor) => {
-    if (anchor) {
+export const nodeOps = {
+  insert: (child: Node, parent: Node, anchor?: Node) => {
+    if (anchor != null) {
       parent.insertBefore(child, anchor)
     } else {
       parent.appendChild(child)
     }
   },
 
-  remove: child => {
+  remove: (child: Node) => {
     const parent = child.parentNode
-    if (parent) {
+    if (parent != null) {
       parent.removeChild(child)
     }
   },
 
-  createElement: (tag, isSVG, is): Element =>
-    isSVG
-      ? doc.createElementNS(svgNS, tag)
-      : doc.createElement(tag, is ? { is } : undefined),
+  createElement: (tag: string, isSVG?: boolean): Element =>
+    isSVG ? doc.createElementNS(svgNS, tag) : doc.createElement(tag),
 
-  createText: text => doc.createTextNode(text),
+  createText: (text: string): Text => doc.createTextNode(text),
 
-  createComment: text => doc.createComment(text),
+  createComment: (text: string): Comment => doc.createComment(text),
 
-  setText: (node, text) => {
+  setText: (node: Text, text: string) => {
     node.nodeValue = text
   },
 
-  setElementText: (el, text) => {
+  setElementText: (el: HTMLElement, text: string) => {
     el.textContent = text
   },
 
-  parentNode: node => node.parentNode as Element | null,
+  parentNode: (node: Node): HTMLElement | null =>
+    node.parentNode as HTMLElement,
 
-  nextSibling: node => node.nextSibling,
+  nextSibling: (node: Node): Node | null => node.nextSibling,
 
-  querySelector: selector => doc.querySelector(selector),
+  querySelector: (selector: string): Element | null =>
+    doc.querySelector(selector),
 
-  setScopeId(el, id) {
+  setScopeId(el: Element, id: string) {
     el.setAttribute(id, '')
-  },
-
-  cloneNode(el) {
-    return el.cloneNode(true)
-  },
-
-  // __UNSAFE__
-  // Reason: innerHTML.
-  // Static content here can only come from compiled templates.
-  // As long as the user only uses trusted templates, this is safe.
-  insertStaticContent(content, parent, anchor, isSVG) {
-    const temp = isSVG
-      ? tempSVGContainer ||
-        (tempSVGContainer = doc.createElementNS(svgNS, 'svg'))
-      : tempContainer || (tempContainer = doc.createElement('div'))
-    temp.innerHTML = content
-    const first = temp.firstChild as Element
-    let node: Element | null = first
-    let last: Element = node
-    while (node) {
-      last = node
-      nodeOps.insert(node, parent, anchor)
-      node = temp.firstChild as Element
-    }
-    return [first, last]
   }
 }

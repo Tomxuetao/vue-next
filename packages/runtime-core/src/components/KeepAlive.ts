@@ -7,26 +7,20 @@ import {
   LifecycleHooks,
   currentInstance
 } from '../component'
-import { VNode, cloneVNode, isVNode, VNodeProps } from '../vnode'
+import { VNode, cloneVNode, isVNode } from '../vnode'
 import { warn } from '../warning'
 import { onBeforeUnmount, injectHook, onUnmounted } from '../apiLifecycle'
-import {
-  isString,
-  isArray,
-  ShapeFlags,
-  remove,
-  invokeArrayFns
-} from '@vue/shared'
+import { isString, isArray } from '@vue/shared'
 import { watch } from '../apiWatch'
+import { ShapeFlags } from '../shapeFlags'
+import { SuspenseBoundary } from './Suspense'
 import {
   RendererInternals,
   queuePostRenderEffect,
-  MoveType,
-  RendererElement,
-  RendererNode
+  invokeHooks,
+  MoveType
 } from '../renderer'
 import { setTransitionHooks } from './BaseTransition'
-import { ComponentRenderContext } from '../componentProxy'
 
 type MatchPattern = string | RegExp | string[] | RegExp[]
 
@@ -40,15 +34,10 @@ type CacheKey = string | number | Component
 type Cache = Map<CacheKey, VNode>
 type Keys = Set<CacheKey>
 
-export interface KeepAliveContext extends ComponentRenderContext {
+export interface KeepAliveSink {
   renderer: RendererInternals
-  activate: (
-    vnode: VNode,
-    container: RendererElement,
-    anchor: RendererNode | null,
-    isSVG: boolean,
-    optimized: boolean
-  ) => void
+  parentSuspense: SuspenseBoundary | null
+  activate: (vnode: VNode, container: object, anchor: object | null) => void
   deactivate: (vnode: VNode) => void
 }
 
@@ -63,8 +52,6 @@ const KeepAliveImpl = {
   // would prevent it from being tree-shaken.
   __isKeepAlive: true,
 
-  inheritRef: true,
-
   props: {
     include: [String, RegExp, Array],
     exclude: [String, RegExp, Array],
@@ -77,52 +64,40 @@ const KeepAliveImpl = {
     let current: VNode | null = null
 
     const instance = getCurrentInstance()!
-    const parentSuspense = instance.suspense
 
-    // KeepAlive communicates with the instantiated renderer via the
-    // ctx where the renderer passes in its internals,
-    // and the KeepAlive instance exposes activate/deactivate implementations.
+    // KeepAlive communicates with the instantiated renderer via the "sink"
+    // where the renderer passes in platform-specific functions, and the
+    // KeepAlive instance exposes activate/deactivate implementations.
     // The whole point of this is to avoid importing KeepAlive directly in the
     // renderer to facilitate tree-shaking.
-    const sharedContext = instance.ctx as KeepAliveContext
+    const sink = instance.sink as KeepAliveSink
     const {
       renderer: {
-        p: patch,
-        m: move,
-        um: _unmount,
-        o: { createElement }
-      }
-    } = sharedContext
+        move,
+        unmount: _unmount,
+        options: { createElement }
+      },
+      parentSuspense
+    } = sink
     const storageContainer = createElement('div')
 
-    sharedContext.activate = (vnode, container, anchor, isSVG, optimized) => {
-      const child = vnode.component!
+    sink.activate = (vnode, container, anchor) => {
       move(vnode, container, anchor, MoveType.ENTER, parentSuspense)
-      // in case props have changed
-      patch(
-        child.vnode,
-        vnode,
-        container,
-        anchor,
-        instance,
-        parentSuspense,
-        isSVG,
-        optimized
-      )
       queuePostRenderEffect(() => {
-        child.isDeactivated = false
-        if (child.a) {
-          invokeArrayFns(child.a)
+        const component = vnode.component!
+        component.isDeactivated = false
+        if (component.a !== null) {
+          invokeHooks(component.a)
         }
       }, parentSuspense)
     }
 
-    sharedContext.deactivate = (vnode: VNode) => {
+    sink.deactivate = (vnode: VNode) => {
       move(vnode, storageContainer, null, MoveType.LEAVE, parentSuspense)
       queuePostRenderEffect(() => {
         const component = vnode.component!
-        if (component.da) {
-          invokeArrayFns(component.da)
+        if (component.da !== null) {
+          invokeHooks(component.da)
         }
         component.isDeactivated = true
       }, parentSuspense)
@@ -161,7 +136,8 @@ const KeepAliveImpl = {
       ([include, exclude]) => {
         include && pruneCache(name => matches(include, name))
         exclude && pruneCache(name => matches(exclude, name))
-      }
+      },
+      { lazy: true }
     )
 
     onBeforeUnmount(() => {
@@ -201,7 +177,7 @@ const KeepAliveImpl = {
       }
 
       const key = vnode.key == null ? comp : vnode.key
-      const cachedVNode = cache.get(key)
+      const cached = cache.get(key)
 
       // clone vnode if it's reused because we are going to mutate it
       if (vnode.el) {
@@ -209,10 +185,11 @@ const KeepAliveImpl = {
       }
       cache.set(key, vnode)
 
-      if (cachedVNode) {
+      if (cached) {
         // copy over mounted state
-        vnode.el = cachedVNode.el
-        vnode.component = cachedVNode.component
+        vnode.el = cached.el
+        vnode.anchor = cached.anchor
+        vnode.component = cached.component
         if (vnode.transition) {
           // recursively update transition hooks on subTree
           setTransitionHooks(vnode, vnode.transition!)
@@ -242,7 +219,7 @@ const KeepAliveImpl = {
 // also to avoid inline import() in generated d.ts files
 export const KeepAlive = (KeepAliveImpl as any) as {
   new (): {
-    $props: VNodeProps & KeepAliveProps
+    $props: KeepAliveProps
   }
 }
 
@@ -306,7 +283,7 @@ function registerKeepAliveHook(
   if (target) {
     let current = target.parent
     while (current && current.parent) {
-      if (isKeepAlive(current.parent.vnode)) {
+      if (current.parent.type === KeepAliveImpl) {
         injectToKeepAliveRoot(wrappedHook, type, target, current)
       }
       current = current.parent
@@ -322,6 +299,7 @@ function injectToKeepAliveRoot(
 ) {
   injectHook(type, hook, keepAliveRoot, true /* prepend */)
   onUnmounted(() => {
-    remove(keepAliveRoot[type]!, hook)
+    const hooks = keepAliveRoot[type]!
+    hooks.splice(hooks.indexOf(hook), 1)
   }, target)
 }

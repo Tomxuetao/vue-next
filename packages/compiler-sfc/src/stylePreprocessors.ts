@@ -1,12 +1,7 @@
 import merge from 'merge-source-map'
 
 export interface StylePreprocessor {
-  render(
-    source: string,
-    map?: object,
-    options?: any,
-    customRequire?: (id: string) => any
-  ): StylePreprocessorResults
+  render(source: string, map?: object, options?: any): StylePreprocessorResults
 }
 
 export interface StylePreprocessorResults {
@@ -17,8 +12,8 @@ export interface StylePreprocessorResults {
 
 // .scss/.sass processor
 const scss: StylePreprocessor = {
-  render(source, map, options, load = require) {
-    const nodeSass = load('sass')
+  render(source, map, options) {
+    const nodeSass = require('sass')
     const finalOptions = {
       ...options,
       data: source,
@@ -46,23 +41,18 @@ const scss: StylePreprocessor = {
 }
 
 const sass: StylePreprocessor = {
-  render(source, map, options, load) {
-    return scss.render(
-      source,
-      map,
-      {
-        ...options,
-        indentedSyntax: true
-      },
-      load
-    )
+  render(source, map, options) {
+    return scss.render(source, map, {
+      ...options,
+      indentedSyntax: true
+    })
   }
 }
 
 // .less
 const less: StylePreprocessor = {
-  render(source, map, options, load = require) {
-    const nodeLess = load('less')
+  render(source, map, options) {
+    const nodeLess = require('less')
 
     let result: any
     let error: Error | null = null
@@ -91,8 +81,8 @@ const less: StylePreprocessor = {
 
 // .styl
 const styl: StylePreprocessor = {
-  render(source, map, options, load = require) {
-    const nodeStylus = load('stylus')
+  render(source, map, options) {
+    const nodeStylus = require('stylus')
     try {
       const ref = nodeStylus(source)
       Object.keys(options).forEach(key => ref.set(key, options[key]))

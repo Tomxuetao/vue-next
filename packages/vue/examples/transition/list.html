@@ -24,7 +24,7 @@ const Item = {
   template: `<div>{{ msg }} <button @click="$emit('rm')">x</button></div>`
 }
 
-Vue.createApp({
+const App = {
   components: {
     Item
   },
@@ -51,7 +51,9 @@ Vue.createApp({
       }
     }
   }
-}).mount('#app')
+}
+
+Vue.createApp().mount(App, '#app')
 </script>
 
 <style>

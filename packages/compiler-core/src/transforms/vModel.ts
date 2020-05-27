@@ -44,7 +44,10 @@ export const transformModel: DirectiveTransform = (dir, node, context) => {
   const eventName = arg
     ? arg.type === NodeTypes.SIMPLE_EXPRESSION && arg.isStatic
       ? `onUpdate:${arg.content}`
-      : createCompoundExpression(['"onUpdate:" + ', arg])
+      : createCompoundExpression([
+          '"onUpdate:" + ',
+          ...(arg.type === NodeTypes.SIMPLE_EXPRESSION ? [arg] : arg.children)
+        ])
     : `onUpdate:modelValue`
 
   const props = [
@@ -53,7 +56,11 @@ export const transformModel: DirectiveTransform = (dir, node, context) => {
     // "onUpdate:modelValue": $event => (foo = $event)
     createObjectProperty(
       eventName,
-      createCompoundExpression([`$event => (`, exp, ` = $event)`])
+      createCompoundExpression([
+        `$event => (`,
+        ...(exp.type === NodeTypes.SIMPLE_EXPRESSION ? [exp] : exp.children),
+        ` = $event)`
+      ])
     )
   ]
 
@@ -75,7 +82,12 @@ export const transformModel: DirectiveTransform = (dir, node, context) => {
     const modifiersKey = arg
       ? arg.type === NodeTypes.SIMPLE_EXPRESSION && arg.isStatic
         ? `${arg.content}Modifiers`
-        : createCompoundExpression([arg, ' + "Modifiers"'])
+        : createCompoundExpression([
+            ...(arg.type === NodeTypes.SIMPLE_EXPRESSION
+              ? [arg]
+              : arg.children),
+            ' + "Modifiers"'
+          ])
       : `modelModifiers`
     props.push(
       createObjectProperty(
@@ -89,5 +101,5 @@ export const transformModel: DirectiveTransform = (dir, node, context) => {
 }
 
 function createTransformProps(props: Property[] = []) {
-  return { props }
+  return { props, needRuntime: false }
 }

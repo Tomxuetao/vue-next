@@ -1,3 +1,4 @@
+// const postcss = require('postcss')
 import postcss, { ProcessOptions, LazyResult, Result, ResultMap } from 'postcss'
 import trimPlugin from './stylePluginTrim'
 import scopedPlugin from './stylePluginScoped'
@@ -18,27 +19,12 @@ export interface SFCStyleCompileOptions {
   trim?: boolean
   preprocessLang?: PreprocessLang
   preprocessOptions?: any
-  preprocessCustomRequire?: (id: string) => any
   postcssOptions?: any
   postcssPlugins?: any[]
 }
 
 export interface SFCAsyncStyleCompileOptions extends SFCStyleCompileOptions {
   isAsync?: boolean
-  // css modules support, note this requires async so that we can get the
-  // resulting json
-  modules?: boolean
-  // maps to postcss-modules options
-  // https://github.com/css-modules/postcss-modules
-  modulesOptions?: {
-    scopeBehaviour?: 'global' | 'local'
-    globalModulePaths?: string[]
-    generateScopedName?:
-      | string
-      | ((name: string, filename: string, css: string) => string)
-    hashPrefix?: string
-    localsConvention?: 'camelCase' | 'camelCaseOnly' | 'dashes' | 'dashesOnly'
-  }
 }
 
 export interface SFCStyleCompileResults {
@@ -46,7 +32,6 @@ export interface SFCStyleCompileResults {
   map: RawSourceMap | undefined
   rawResult: LazyResult | Result | undefined
   errors: Error[]
-  modules?: Record<string, string>
 }
 
 export function compileStyle(
@@ -59,7 +44,7 @@ export function compileStyle(
 }
 
 export function compileStyleAsync(
-  options: SFCAsyncStyleCompileOptions
+  options: SFCStyleCompileOptions
 ): Promise<SFCStyleCompileResults> {
   return doCompileStyle({ ...options, isAsync: true }) as Promise<
     SFCStyleCompileResults
@@ -72,10 +57,8 @@ export function doCompileStyle(
   const {
     filename,
     id,
-    scoped = false,
+    scoped = true,
     trim = true,
-    modules = false,
-    modulesOptions = {},
     preprocessLang,
     postcssOptions,
     postcssPlugins
@@ -91,27 +74,6 @@ export function doCompileStyle(
   }
   if (scoped) {
     plugins.push(scopedPlugin(id))
-  }
-  let cssModules: Record<string, string> | undefined
-  if (modules) {
-    if (__GLOBAL__ || __ESM_BROWSER__) {
-      throw new Error(
-        '[@vue/compiler-sfc] `modules` option is not supported in the browser build.'
-      )
-    }
-    if (!options.isAsync) {
-      throw new Error(
-        '[@vue/compiler-sfc] `modules` option can only be used with compileStyleAsync().'
-      )
-    }
-    plugins.push(
-      require('postcss-modules')({
-        ...modulesOptions,
-        getJSON: (_cssFileName: string, json: Record<string, string>) => {
-          cssModules = json
-        }
-      })
-    )
   }
 
   const postCSSOptions: ProcessOptions = {
@@ -146,7 +108,6 @@ export function doCompileStyle(
           code: result.css || '',
           map: result.map && (result.map.toJSON() as any),
           errors,
-          modules: cssModules,
           rawResult: result
         }))
         .catch(error => ({
@@ -176,21 +137,8 @@ function preprocess(
   options: SFCStyleCompileOptions,
   preprocessor: StylePreprocessor
 ): StylePreprocessorResults {
-  if ((__ESM_BROWSER__ || __GLOBAL__) && !options.preprocessCustomRequire) {
-    throw new Error(
-      `[@vue/compiler-sfc] Style preprocessing in the browser build must ` +
-        `provide the \`preprocessCustomRequire\` option to return the in-browser ` +
-        `version of the preprocessor.`
-    )
-  }
-
-  return preprocessor.render(
-    options.source,
-    options.map,
-    {
-      filename: options.filename,
-      ...options.preprocessOptions
-    },
-    options.preprocessCustomRequire
-  )
+  return preprocessor.render(options.source, options.map, {
+    filename: options.filename,
+    ...options.preprocessOptions
+  })
 }

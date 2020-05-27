@@ -3,37 +3,22 @@ import {
   baseParse,
   CompilerOptions,
   CodegenResult,
+  isBuiltInType,
   ParserOptions,
-  RootNode,
-  noopDirectiveTransform,
-  NodeTransform,
-  DirectiveTransform
+  RootNode
 } from '@vue/compiler-core'
-import { parserOptions } from './parserOptions'
+import { parserOptionsMinimal } from './parserOptionsMinimal'
+import { parserOptionsStandard } from './parserOptionsStandard'
 import { transformStyle } from './transforms/transformStyle'
+import { transformCloak } from './transforms/vCloak'
 import { transformVHtml } from './transforms/vHtml'
 import { transformVText } from './transforms/vText'
 import { transformModel } from './transforms/vModel'
 import { transformOn } from './transforms/vOn'
 import { transformShow } from './transforms/vShow'
-import { warnTransitionChildren } from './transforms/warnTransitionChildren'
-import { stringifyStatic } from './transforms/stringifyStatic'
+import { TRANSITION, TRANSITION_GROUP } from './runtimeHelpers'
 
-export { parserOptions }
-
-export const DOMNodeTransforms: NodeTransform[] = [
-  transformStyle,
-  ...(__DEV__ ? [warnTransitionChildren] : [])
-]
-
-export const DOMDirectiveTransforms: Record<string, DirectiveTransform> = {
-  cloak: noopDirectiveTransform,
-  html: transformVHtml,
-  text: transformVText,
-  model: transformModel, // override compiler-core
-  on: transformOn, // override compiler-core
-  show: transformShow
-}
+const parserOptions = __BROWSER__ ? parserOptionsMinimal : parserOptionsStandard
 
 export function compile(
   template: string,
@@ -42,12 +27,23 @@ export function compile(
   return baseCompile(template, {
     ...parserOptions,
     ...options,
-    nodeTransforms: [...DOMNodeTransforms, ...(options.nodeTransforms || [])],
+    nodeTransforms: [transformStyle, ...(options.nodeTransforms || [])],
     directiveTransforms: {
-      ...DOMDirectiveTransforms,
+      cloak: transformCloak,
+      html: transformVHtml,
+      text: transformVText,
+      model: transformModel, // override compiler-core
+      on: transformOn,
+      show: transformShow,
       ...(options.directiveTransforms || {})
     },
-    transformHoist: __BROWSER__ ? null : stringifyStatic
+    isBuiltInComponent: tag => {
+      if (isBuiltInType(tag, `Transition`)) {
+        return TRANSITION
+      } else if (isBuiltInType(tag, `TransitionGroup`)) {
+        return TRANSITION_GROUP
+      }
+    }
   })
 }
 
@@ -58,7 +54,4 @@ export function parse(template: string, options: ParserOptions = {}): RootNode {
   })
 }
 
-export * from './runtimeHelpers'
-export { transformStyle } from './transforms/transformStyle'
-export { createDOMCompilerError, DOMErrorCodes } from './errors'
 export * from '@vue/compiler-core'

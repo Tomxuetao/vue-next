@@ -1,32 +1,24 @@
-import {
-  watch,
-  watchEffect,
-  reactive,
-  computed,
-  nextTick,
-  ref,
-  h
-} from '../src/index'
-import { render, nodeOps, serializeInner } from '@vue/runtime-test'
+import { watch, reactive, computed, nextTick, ref, h } from '../src/index'
+import { render, nodeOps, serializeInner, mockWarn } from '@vue/runtime-test'
 import {
   ITERATE_KEY,
   DebuggerEvent,
   TrackOpTypes,
   TriggerOpTypes
 } from '@vue/reactivity'
-import { mockWarn } from '@vue/shared'
 
 // reference: https://vue-composition-api-rfc.netlify.com/api.html#watch
 
 describe('api: watch', () => {
   mockWarn()
 
-  it('effect', async () => {
+  it('basic usage', async () => {
     const state = reactive({ count: 0 })
     let dummy
-    watchEffect(() => {
+    watch(() => {
       dummy = state.count
     })
+    await nextTick()
     expect(dummy).toBe(0)
 
     state.count++
@@ -43,11 +35,12 @@ describe('api: watch', () => {
         dummy = [count, prevCount]
         // assert types
         count + 1
-        if (prevCount) {
-          prevCount + 1
-        }
+        prevCount + 1
       }
     )
+    await nextTick()
+    expect(dummy).toMatchObject([0, undefined])
+
     state.count++
     await nextTick()
     expect(dummy).toMatchObject([1, 0])
@@ -60,10 +53,11 @@ describe('api: watch', () => {
       dummy = [count, prevCount]
       // assert types
       count + 1
-      if (prevCount) {
-        prevCount + 1
-      }
+      prevCount + 1
     })
+    await nextTick()
+    expect(dummy).toMatchObject([0, undefined])
+
     count.value++
     await nextTick()
     expect(dummy).toMatchObject([1, 0])
@@ -77,43 +71,14 @@ describe('api: watch', () => {
       dummy = [count, prevCount]
       // assert types
       count + 1
-      if (prevCount) {
-        prevCount + 1
-      }
+      prevCount + 1
     })
+    await nextTick()
+    expect(dummy).toMatchObject([1, undefined])
+
     count.value++
     await nextTick()
     expect(dummy).toMatchObject([2, 1])
-  })
-
-  it('watching primitive with deep: true', async () => {
-    const count = ref(0)
-    let dummy
-    watch(
-      count,
-      (c, prevCount) => {
-        dummy = [c, prevCount]
-      },
-      {
-        deep: true
-      }
-    )
-    count.value++
-    await nextTick()
-    expect(dummy).toMatchObject([1, 0])
-  })
-
-  it('directly watching reactive object (with automatic deep: true)', async () => {
-    const src = reactive({
-      count: 0
-    })
-    let dummy
-    watch(src, ({ count }) => {
-      dummy = count
-    })
-    src.count++
-    await nextTick()
-    expect(dummy).toBe(1)
   })
 
   it('watching multiple sources', async () => {
@@ -128,6 +93,8 @@ describe('api: watch', () => {
       vals.concat(1)
       oldVals.concat(1)
     })
+    await nextTick()
+    expect(dummy).toMatchObject([[1, 1, 2], []])
 
     state.count++
     count.value++
@@ -142,49 +109,28 @@ describe('api: watch', () => {
     let dummy
     watch([() => state.count, status] as const, (vals, oldVals) => {
       dummy = [vals, oldVals]
-      const [count] = vals
-      const [, oldStatus] = oldVals
+      let [count] = vals
+      let [, oldStatus] = oldVals
       // assert types
       count + 1
       oldStatus === true
     })
+    await nextTick()
+    expect(dummy).toMatchObject([[1, false], []])
 
     state.count++
-    status.value = true
+    status.value = false
     await nextTick()
-    expect(dummy).toMatchObject([[2, true], [1, false]])
+    expect(dummy).toMatchObject([[2, false], [1, false]])
   })
 
-  it('watching multiple sources: reactive object (with automatic deep: true)', async () => {
-    const src = reactive({ count: 0 })
-    let dummy
-    watch([src], ([state]) => {
-      dummy = state
-      // assert types
-      state.count === 1
-    })
-    src.count++
-    await nextTick()
-    expect(dummy).toMatchObject({ count: 1 })
-  })
-
-  it('warn invalid watch source', () => {
-    // @ts-ignore
-    watch(1, () => {})
-    expect(`Invalid watch source`).toHaveBeenWarned()
-  })
-
-  it('warn invalid watch source: multiple sources', () => {
-    watch([1], () => {})
-    expect(`Invalid watch source`).toHaveBeenWarned()
-  })
-
-  it('stopping the watcher (effect)', async () => {
+  it('stopping the watcher', async () => {
     const state = reactive({ count: 0 })
     let dummy
-    const stop = watchEffect(() => {
+    const stop = watch(() => {
       dummy = state.count
     })
+    await nextTick()
     expect(dummy).toBe(0)
 
     stop()
@@ -194,35 +140,15 @@ describe('api: watch', () => {
     expect(dummy).toBe(0)
   })
 
-  it('stopping the watcher (with source)', async () => {
-    const state = reactive({ count: 0 })
-    let dummy
-    const stop = watch(
-      () => state.count,
-      count => {
-        dummy = count
-      }
-    )
-
-    state.count++
-    await nextTick()
-    expect(dummy).toBe(1)
-
-    stop()
-    state.count++
-    await nextTick()
-    // should not update
-    expect(dummy).toBe(1)
-  })
-
-  it('cleanup registration (effect)', async () => {
+  it('cleanup registration (basic)', async () => {
     const state = reactive({ count: 0 })
     const cleanup = jest.fn()
     let dummy
-    const stop = watchEffect(onCleanup => {
+    const stop = watch(onCleanup => {
       onCleanup(cleanup)
       dummy = state.count
     })
+    await nextTick()
     expect(dummy).toBe(0)
 
     state.count++
@@ -242,35 +168,27 @@ describe('api: watch', () => {
       onCleanup(cleanup)
       dummy = count
     })
-
-    count.value++
     await nextTick()
-    expect(cleanup).toHaveBeenCalledTimes(0)
-    expect(dummy).toBe(1)
+    expect(dummy).toBe(0)
 
     count.value++
     await nextTick()
     expect(cleanup).toHaveBeenCalledTimes(1)
-    expect(dummy).toBe(2)
+    expect(dummy).toBe(1)
 
     stop()
     expect(cleanup).toHaveBeenCalledTimes(2)
   })
 
-  it('flush timing: post (default)', async () => {
+  it('flush timing: post', async () => {
     const count = ref(0)
-    let callCount = 0
     const assertion = jest.fn(count => {
-      callCount++
-      // on mount, the watcher callback should be called before DOM render
-      // on update, should be called after the count is updated
-      const expectedDOM = callCount === 1 ? `` : `${count}`
-      expect(serializeInner(root)).toBe(expectedDOM)
+      expect(serializeInner(root)).toBe(`${count}`)
     })
 
     const Comp = {
       setup() {
-        watchEffect(() => {
+        watch(() => {
           assertion(count.value)
         })
         return () => count.value
@@ -278,6 +196,7 @@ describe('api: watch', () => {
     }
     const root = nodeOps.createElement('div')
     render(h(Comp), root)
+    await nextTick()
     expect(assertion).toHaveBeenCalledTimes(1)
 
     count.value++
@@ -304,7 +223,7 @@ describe('api: watch', () => {
 
     const Comp = {
       setup() {
-        watchEffect(
+        watch(
           () => {
             assertion(count.value, count2.value)
           },
@@ -317,6 +236,7 @@ describe('api: watch', () => {
     }
     const root = nodeOps.createElement('div')
     render(h(Comp), root)
+    await nextTick()
     expect(assertion).toHaveBeenCalledTimes(1)
 
     count.value++
@@ -346,7 +266,7 @@ describe('api: watch', () => {
 
     const Comp = {
       setup() {
-        watchEffect(
+        watch(
           () => {
             assertion(count.value)
           },
@@ -359,6 +279,7 @@ describe('api: watch', () => {
     }
     const root = nodeOps.createElement('div')
     render(h(Comp), root)
+    await nextTick()
     expect(assertion).toHaveBeenCalledTimes(1)
 
     count.value++
@@ -391,6 +312,9 @@ describe('api: watch', () => {
       { deep: true }
     )
 
+    await nextTick()
+    expect(dummy).toEqual([0, 1, 1, true])
+
     state.nested.count++
     await nextTick()
     expect(dummy).toEqual([1, 1, 1, true])
@@ -411,75 +335,35 @@ describe('api: watch', () => {
     expect(dummy).toEqual([1, 2, 2, false])
   })
 
-  it('immediate', async () => {
+  it('lazy', async () => {
     const count = ref(0)
     const cb = jest.fn()
-    watch(count, cb, { immediate: true })
-    expect(cb).toHaveBeenCalledTimes(1)
+    watch(count, cb, { lazy: true })
+    await nextTick()
+    expect(cb).not.toHaveBeenCalled()
     count.value++
     await nextTick()
-    expect(cb).toHaveBeenCalledTimes(2)
+    expect(cb).toHaveBeenCalled()
   })
 
-  it('immediate: triggers when initial value is null', async () => {
-    const state = ref(null)
-    const spy = jest.fn()
-    watch(() => state.value, spy, { immediate: true })
-    expect(spy).toHaveBeenCalled()
-  })
-
-  it('immediate: triggers when initial value is undefined', async () => {
-    const state = ref()
-    const spy = jest.fn()
-    watch(() => state.value, spy, { immediate: true })
-    expect(spy).toHaveBeenCalled()
-    state.value = 3
-    await nextTick()
-    expect(spy).toHaveBeenCalledTimes(2)
-    // testing if undefined can trigger the watcher
-    state.value = undefined
-    await nextTick()
-    expect(spy).toHaveBeenCalledTimes(3)
-    // it shouldn't trigger if the same value is set
-    state.value = undefined
-    await nextTick()
-    expect(spy).toHaveBeenCalledTimes(3)
-  })
-
-  it('warn immediate option when using effect', async () => {
+  it('ignore lazy option when using simple callback', async () => {
     const count = ref(0)
     let dummy
-    watchEffect(
+    watch(
       () => {
         dummy = count.value
       },
-      // @ts-ignore
-      { immediate: false }
+      { lazy: true }
     )
+    expect(dummy).toBeUndefined()
+    expect(`lazy option is only respected`).toHaveBeenWarned()
+
+    await nextTick()
     expect(dummy).toBe(0)
-    expect(`"immediate" option is only respected`).toHaveBeenWarned()
 
     count.value++
     await nextTick()
     expect(dummy).toBe(1)
-  })
-
-  it('warn and not respect deep option when using effect', async () => {
-    const arr = ref([1, [2]])
-    const spy = jest.fn()
-    watchEffect(
-      () => {
-        spy()
-        return arr
-      },
-      // @ts-ignore
-      { deep: true }
-    )
-    expect(spy).toHaveBeenCalledTimes(1)
-    ;(arr.value[1] as Array<number>)[0] = 3
-    await nextTick()
-    expect(spy).toHaveBeenCalledTimes(1)
-    expect(`"deep" option is only respected`).toHaveBeenWarned()
   })
 
   it('onTrack', async () => {
@@ -489,7 +373,7 @@ describe('api: watch', () => {
       events.push(e)
     })
     const obj = reactive({ foo: 1, bar: 2 })
-    watchEffect(
+    watch(
       () => {
         dummy = [obj.foo, 'bar' in obj, Object.keys(obj)]
       },
@@ -524,7 +408,7 @@ describe('api: watch', () => {
       events.push(e)
     })
     const obj = reactive({ foo: 1 })
-    watchEffect(
+    watch(
       () => {
         dummy = obj.foo
       },

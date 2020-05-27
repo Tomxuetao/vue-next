@@ -2,9 +2,9 @@ import {
   createRenderer,
   VNode,
   RootRenderFunction,
-  CreateAppFunction
+  App
 } from '@vue/runtime-core'
-import { nodeOps, TestElement } from './nodeOps'
+import { nodeOps, TestNode, TestElement } from './nodeOps'
 import { patchProp } from './patchProp'
 import { serializeInner } from './serialize'
 
@@ -13,8 +13,8 @@ const { render: baseRender, createApp: baseCreateApp } = createRenderer({
   ...nodeOps
 })
 
-export const render = baseRender as RootRenderFunction<TestElement>
-export const createApp = baseCreateApp as CreateAppFunction<TestElement>
+export const render = baseRender as RootRenderFunction<TestNode, TestElement>
+export const createApp = baseCreateApp as () => App<TestElement>
 
 // convenience for one-off render validations
 export function renderToString(vnode: VNode) {
@@ -26,4 +26,5 @@ export function renderToString(vnode: VNode) {
 export * from './triggerEvent'
 export * from './serialize'
 export * from './nodeOps'
+export * from './utils/mockWarn'
 export * from '@vue/runtime-core'

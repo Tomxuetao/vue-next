@@ -9,10 +9,10 @@ import {
 } from './Transition'
 import {
   Fragment,
-  Comment,
   VNode,
   warn,
   resolveTransitionHooks,
+  toRaw,
   useTransitionState,
   getCurrentInstance,
   setTransitionHooks,
@@ -20,7 +20,6 @@ import {
   onUpdated,
   SetupContext
 } from '@vue/runtime-core'
-import { toRaw } from '@vue/reactivity'
 
 interface Position {
   top: number
@@ -36,12 +35,6 @@ export type TransitionGroupProps = Omit<TransitionProps, 'mode'> & {
 }
 
 const TransitionGroupImpl = {
-  props: {
-    ...TransitionPropsValidators,
-    tag: String,
-    moveClass: String
-  },
-
   setup(props: TransitionGroupProps, { slots }: SetupContext) {
     const instance = getCurrentInstance()!
     const state = useTransitionState()
@@ -59,8 +52,8 @@ const TransitionGroupImpl = {
       hasMove =
         hasMove === null
           ? (hasMove = hasCSSTransform(
-              prevChildren[0].el as ElementWithTransition,
-              instance.vnode.el as Node,
+              prevChildren[0].el,
+              instance.vnode.el,
               moveClass
             ))
           : hasMove
@@ -78,17 +71,17 @@ const TransitionGroupImpl = {
       forceReflow()
 
       movedChildren.forEach(c => {
-        const el = c.el as ElementWithTransition
+        const el = c.el
         const style = el.style
         addTransitionClass(el, moveClass)
-        style.transform = style.webkitTransform = style.transitionDuration = ''
-        const cb = ((el as any)._moveCb = (e: TransitionEvent) => {
+        style.transform = style.WebkitTransform = style.transitionDuration = ''
+        const cb = (el._moveCb = (e: TransitionEvent) => {
           if (e && e.target !== el) {
             return
           }
           if (!e || /transform$/.test(e.propertyName)) {
             el.removeEventListener('transitionend', cb)
-            ;(el as any)._moveCb = null
+            el._moveCb = null
             removeTransitionClass(el, moveClass)
           }
         })
@@ -101,8 +94,12 @@ const TransitionGroupImpl = {
       const cssTransitionProps = resolveTransitionProps(rawProps)
       const tag = rawProps.tag || Fragment
       prevChildren = children
-      const slotChildren = slots.default ? slots.default() : []
-      children = getTransitionRawChildren(slotChildren)
+      children = slots.default ? slots.default() : []
+
+      // handle fragment children case, e.g. v-for
+      if (children.length === 1 && children[0].type === Fragment) {
+        children = children[0].children as VNode[]
+      }
 
       for (let i = 0; i < children.length; i++) {
         const child = children[i]
@@ -123,33 +120,14 @@ const TransitionGroupImpl = {
             child,
             resolveTransitionHooks(child, cssTransitionProps, state, instance)
           )
-          positionMap.set(child, (child.el as Element).getBoundingClientRect())
+          positionMap.set(child, child.el.getBoundingClientRect())
         }
       }
 
-      return createVNode(tag, null, slotChildren)
+      return createVNode(tag, null, children)
     }
   }
 }
-
-function getTransitionRawChildren(children: VNode[]): VNode[] {
-  let ret: VNode[] = []
-  for (let i = 0; i < children.length; i++) {
-    const child = children[i]
-    // handle fragment children case, e.g. v-for
-    if (child.type === Fragment) {
-      ret = ret.concat(getTransitionRawChildren(child.children as VNode[]))
-    }
-    // comment placeholders should be skipped, e.g. v-if
-    else if (child.type !== Comment) {
-      ret.push(child)
-    }
-  }
-  return ret
-}
-
-// remove mode props as TransitionGroup doesn't support it
-delete TransitionGroupImpl.props.mode
 
 export const TransitionGroup = (TransitionGroupImpl as unknown) as {
   new (): {
@@ -157,18 +135,26 @@ export const TransitionGroup = (TransitionGroupImpl as unknown) as {
   }
 }
 
+if (__DEV__) {
+  const props = ((TransitionGroup as any).props = {
+    ...TransitionPropsValidators,
+    tag: String,
+    moveClass: String
+  })
+  delete props.mode
+}
+
 function callPendingCbs(c: VNode) {
-  const el = c.el as any
-  if (el._moveCb) {
-    el._moveCb()
+  if (c.el._moveCb) {
+    c.el._moveCb()
   }
-  if (el._enterCb) {
-    el._enterCb()
+  if (c.el._enterCb) {
+    c.el._enterCb()
   }
 }
 
 function recordPosition(c: VNode) {
-  newPositionMap.set(c, (c.el as Element).getBoundingClientRect())
+  newPositionMap.set(c, c.el.getBoundingClientRect())
 }
 
 function applyTranslation(c: VNode): VNode | undefined {
@@ -177,8 +163,8 @@ function applyTranslation(c: VNode): VNode | undefined {
   const dx = oldPos.left - newPos.left
   const dy = oldPos.top - newPos.top
   if (dx || dy) {
-    const s = (c.el as HTMLElement).style
-    s.transform = s.webkitTransform = `translate(${dx}px,${dy}px)`
+    const s = c.el.style
+    s.transform = s.WebkitTransform = `translate(${dx}px,${dy}px)`
     s.transitionDuration = '0s'
     return c
   }
@@ -201,11 +187,9 @@ function hasCSSTransform(
   // is applied.
   const clone = el.cloneNode() as HTMLElement
   if (el._vtc) {
-    el._vtc.forEach(cls => {
-      cls.split(/\s+/).forEach(c => c && clone.classList.remove(c))
-    })
+    el._vtc.forEach(cls => clone.classList.remove(cls))
   }
-  moveClass.split(/\s+/).forEach(c => c && clone.classList.add(c))
+  clone.classList.add(moveClass)
   clone.style.display = 'none'
   const container = (root.nodeType === 1
     ? root

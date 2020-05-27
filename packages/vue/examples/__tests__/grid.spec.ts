@@ -1,5 +1,5 @@
 import path from 'path'
-import { setupPuppeteer, E2E_TIMEOUT } from './e2eUtils'
+import { setupPuppeteer } from './e2eUtils'
 
 interface TableData {
   name: string
@@ -103,19 +103,11 @@ describe('e2e: grid', () => {
     expect(await count('p')).toBe(1)
   }
 
-  test(
-    'classic',
-    async () => {
-      await testGrid('classic')
-    },
-    E2E_TIMEOUT
-  )
+  test('classic', async () => {
+    await testGrid('classic')
+  })
 
-  test(
-    'composition',
-    async () => {
-      await testGrid('composition')
-    },
-    E2E_TIMEOUT
-  )
+  test('composition', async () => {
+    await testGrid('composition')
+  })
 })

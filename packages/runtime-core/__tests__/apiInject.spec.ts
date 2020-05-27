@@ -9,8 +9,7 @@ import {
   readonly,
   reactive
 } from '../src/index'
-import { render, nodeOps, serialize } from '@vue/runtime-test'
-import { mockWarn } from '@vue/shared'
+import { render, nodeOps, serialize, mockWarn } from '@vue/runtime-test'
 
 // reference: https://vue-composition-api-rfc.netlify.com/api.html#provide-inject
 
@@ -283,28 +282,5 @@ describe('api: provide/inject', () => {
     render(h(Provider), root)
     expect(serialize(root)).toBe(`<div><!----></div>`)
     expect(`injection "foo" not found.`).toHaveBeenWarned()
-  })
-
-  it('should not warn when default value is undefined', () => {
-    const Provider = {
-      setup() {
-        return () => h(Middle)
-      }
-    }
-
-    const Middle = {
-      render: () => h(Consumer)
-    }
-
-    const Consumer = {
-      setup() {
-        const foo = inject('foo', undefined)
-        return () => foo
-      }
-    }
-
-    const root = nodeOps.createElement('div')
-    render(h(Provider), root)
-    expect(`injection "foo" not found.`).not.toHaveBeenWarned()
   })
 })

@@ -1,17 +1,16 @@
-import { effect, ReactiveEffect, trigger, track } from './effect'
-import { TriggerOpTypes, TrackOpTypes } from './operations'
-import { Ref } from './ref'
+import { effect, ReactiveEffect, activeEffect } from './effect'
+import { Ref, UnwrapRef } from './ref'
 import { isFunction, NOOP } from '@vue/shared'
 
 export interface ComputedRef<T = any> extends WritableComputedRef<T> {
-  readonly value: T
+  readonly value: UnwrapRef<T>
 }
 
 export interface WritableComputedRef<T> extends Ref<T> {
   readonly effect: ReactiveEffect<T>
 }
 
-export type ComputedGetter<T> = (ctx?: any) => T
+export type ComputedGetter<T> = () => T
 export type ComputedSetter<T> = (v: T) => void
 
 export interface WritableComputedOptions<T> {
@@ -43,21 +42,17 @@ export function computed<T>(
 
   let dirty = true
   let value: T
-  let computed: ComputedRef<T>
 
   const runner = effect(getter, {
     lazy: true,
     // mark effect as computed so that it gets priority during trigger
     computed: true,
     scheduler: () => {
-      if (!dirty) {
-        dirty = true
-        trigger(computed, TriggerOpTypes.SET, 'value')
-      }
+      dirty = true
     }
   })
-  computed = {
-    __v_isRef: true,
+  return {
+    _isRef: true,
     // expose effect so computed can be stopped
     effect: runner,
     get value() {
@@ -65,12 +60,27 @@ export function computed<T>(
         value = runner()
         dirty = false
       }
-      track(computed, TrackOpTypes.GET, 'value')
+      // When computed effects are accessed in a parent effect, the parent
+      // should track all the dependencies the computed property has tracked.
+      // This should also apply for chained computed properties.
+      trackChildRun(runner)
       return value
     },
     set value(newValue: T) {
       setter(newValue)
     }
   } as any
-  return computed
+}
+
+function trackChildRun(childRunner: ReactiveEffect) {
+  if (activeEffect === undefined) {
+    return
+  }
+  for (let i = 0; i < childRunner.deps.length; i++) {
+    const dep = childRunner.deps[i]
+    if (!dep.has(activeEffect)) {
+      dep.add(activeEffect)
+      activeEffect.deps.push(dep)
+    }
+  }
 }

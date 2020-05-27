@@ -29,13 +29,15 @@ describe('compiler: v-text transform', () => {
   it('should convert v-text to textContent', () => {
     const ast = transformWithVText(`<div v-text="test"/>`)
     expect((ast.children[0] as PlainElementNode).codegenNode).toMatchObject({
-      tag: `"div"`,
-      props: createObjectMatcher({
-        textContent: `[test]`
-      }),
-      children: undefined,
-      patchFlag: genFlagText(PatchFlags.PROPS),
-      dynamicProps: `["textContent"]`
+      arguments: [
+        `"div"`,
+        createObjectMatcher({
+          textContent: `[test]`
+        }),
+        `null`,
+        genFlagText(PatchFlags.PROPS),
+        `["textContent"]`
+      ]
     })
   })
 
@@ -48,13 +50,15 @@ describe('compiler: v-text transform', () => {
       [{ code: DOMErrorCodes.X_V_TEXT_WITH_CHILDREN }]
     ])
     expect((ast.children[0] as PlainElementNode).codegenNode).toMatchObject({
-      tag: `"div"`,
-      props: createObjectMatcher({
-        textContent: `[test]`
-      }),
-      children: undefined, // <-- children should have been removed
-      patchFlag: genFlagText(PatchFlags.PROPS),
-      dynamicProps: `["textContent"]`
+      arguments: [
+        `"div"`,
+        createObjectMatcher({
+          textContent: `[test]`
+        }),
+        `null`, // <-- children should have been removed
+        genFlagText(PatchFlags.PROPS),
+        `["textContent"]`
+      ]
     })
   })
 

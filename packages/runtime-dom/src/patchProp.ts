@@ -3,22 +3,24 @@ import { patchStyle } from './modules/style'
 import { patchAttr } from './modules/attrs'
 import { patchDOMProp } from './modules/props'
 import { patchEvent } from './modules/events'
-import { isOn, isString, isFunction } from '@vue/shared'
-import { RendererOptions } from '@vue/runtime-core'
+import { isOn } from '@vue/shared'
+import {
+  ComponentInternalInstance,
+  SuspenseBoundary,
+  VNode
+} from '@vue/runtime-core'
 
-const nativeOnRE = /^on[a-z]/
-
-export const patchProp: RendererOptions<Node, Element>['patchProp'] = (
-  el,
-  key,
-  prevValue,
-  nextValue,
-  isSVG = false,
-  prevChildren,
-  parentComponent,
-  parentSuspense,
-  unmountChildren
-) => {
+export function patchProp(
+  el: Element,
+  key: string,
+  nextValue: any,
+  prevValue: any,
+  isSVG: boolean,
+  prevChildren?: VNode[],
+  parentComponent?: ComponentInternalInstance,
+  parentSuspense?: SuspenseBoundary<Node, Element>,
+  unmountChildren?: any
+) {
   switch (key) {
     // special
     case 'class':
@@ -27,24 +29,20 @@ export const patchProp: RendererOptions<Node, Element>['patchProp'] = (
     case 'style':
       patchStyle(el, prevValue, nextValue)
       break
+    case 'modelValue':
+    case 'onUpdate:modelValue':
+      // Do nothing. This is handled by v-model directives.
+      break
     default:
       if (isOn(key)) {
-        // ignore v-model listeners
-        if (!key.startsWith('onUpdate:')) {
-          patchEvent(el, key, prevValue, nextValue, parentComponent)
-        }
-      } else if (
-        isSVG
-          ? // most keys must be set as attribute on svg elements to work
-            // ...except innerHTML
-            key === 'innerHTML' ||
-            // or native onclick with function values
-            (key in el && nativeOnRE.test(key) && isFunction(nextValue))
-          : // for normal html elements, set as a property if it exists
-            key in el &&
-            // except native onclick with string values
-            !(nativeOnRE.test(key) && isString(nextValue))
-      ) {
+        patchEvent(
+          el,
+          key.slice(2).toLowerCase(),
+          prevValue,
+          nextValue,
+          parentComponent
+        )
+      } else if (!isSVG && key in el) {
         patchDOMProp(
           el,
           key,
@@ -64,7 +62,7 @@ export const patchProp: RendererOptions<Node, Element>['patchProp'] = (
         } else if (key === 'false-value') {
           ;(el as any)._falseValue = nextValue
         }
-        patchAttr(el, key, nextValue, isSVG)
+        patchAttr(el, key, nextValue)
       }
       break
   }

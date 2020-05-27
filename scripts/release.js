@@ -15,7 +15,7 @@ const packages = fs
   .readdirSync(path.resolve(__dirname, '../packages'))
   .filter(p => !p.endsWith('.ts') && !p.startsWith('.'))
 
-const skippedPackages = []
+const skippedPackages = ['server-renderer']
 
 const versionIncrements = [
   'patch',
@@ -79,7 +79,7 @@ async function main() {
   step('\nRunning tests...')
   if (!skipTests && !isDryRun) {
     await run(bin('jest'), ['--clearCache'])
-    await run('yarn', ['test', '--runInBand'])
+    await run('yarn', ['test'])
   } else {
     console.log(`(skipped)`)
   }
@@ -184,12 +184,13 @@ async function publishPackage(pkgName, version, runIfNotDry) {
 
   // for now (alpha/beta phase), every package except "vue" can be published as
   // `latest`, whereas "vue" will be published under the "next" tag.
-  const releaseTag = pkgName === 'vue' ? 'next' : null
+  const releaseTag =
+    pkgName === 'vue' ? 'next' : semver.prerelease(version)[0] || 'latest'
 
-  // TODO use inferred release channel after official 3.0 release
-  // const releaseTag = semver.prerelease(version)[0] || null
+  // TODO use inferred release channel after offcial 3.0 release
+  // const releaseTag = semver.prerelease(version)[0] || 'latest'
 
-  step(`Publishing ${pkgName}...`)
+  step(`Publishing ${pkg}...`)
   try {
     await runIfNotDry(
       'yarn',
@@ -197,7 +198,8 @@ async function publishPackage(pkgName, version, runIfNotDry) {
         'publish',
         '--new-version',
         version,
-        ...(releaseTag ? ['--tag', releaseTag] : []),
+        '--tag',
+        releaseTag,
         '--access',
         'public'
       ],

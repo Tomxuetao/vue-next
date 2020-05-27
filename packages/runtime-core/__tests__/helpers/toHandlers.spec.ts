@@ -1,5 +1,5 @@
 import { toHandlers } from '../../src/helpers/toHandlers'
-import { mockWarn } from '@vue/shared'
+import { mockWarn } from '@vue/runtime-test'
 
 describe('toHandlers', () => {
   mockWarn()

@@ -29,13 +29,15 @@ describe('compiler: v-html transform', () => {
   it('should convert v-html to innerHTML', () => {
     const ast = transformWithVHtml(`<div v-html="test"/>`)
     expect((ast.children[0] as PlainElementNode).codegenNode).toMatchObject({
-      tag: `"div"`,
-      props: createObjectMatcher({
-        innerHTML: `[test]`
-      }),
-      children: undefined,
-      patchFlag: genFlagText(PatchFlags.PROPS),
-      dynamicProps: `["innerHTML"]`
+      arguments: [
+        `"div"`,
+        createObjectMatcher({
+          innerHTML: `[test]`
+        }),
+        `null`,
+        genFlagText(PatchFlags.PROPS),
+        `["innerHTML"]`
+      ]
     })
   })
 
@@ -48,13 +50,15 @@ describe('compiler: v-html transform', () => {
       [{ code: DOMErrorCodes.X_V_HTML_WITH_CHILDREN }]
     ])
     expect((ast.children[0] as PlainElementNode).codegenNode).toMatchObject({
-      tag: `"div"`,
-      props: createObjectMatcher({
-        innerHTML: `[test]`
-      }),
-      children: undefined, // <-- children should have been removed
-      patchFlag: genFlagText(PatchFlags.PROPS),
-      dynamicProps: `["innerHTML"]`
+      arguments: [
+        `"div"`,
+        createObjectMatcher({
+          innerHTML: `[test]`
+        }),
+        `null`, // <-- children should have been removed
+        genFlagText(PatchFlags.PROPS),
+        `["innerHTML"]`
+      ]
     })
   })
 

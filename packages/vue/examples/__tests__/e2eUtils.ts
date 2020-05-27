@@ -1,7 +1,5 @@
 import puppeteer from 'puppeteer'
 
-export const E2E_TIMEOUT = 30 * 1000
-
 const puppeteerOptions = process.env.CI
   ? { args: ['--no-sandbox', '--disable-setuid-sandbox'] }
   : {}
@@ -42,7 +40,7 @@ export function setupPuppeteer() {
   }
 
   async function value(selector: string) {
-    return await page.$eval(selector, node => (node as HTMLInputElement).value)
+    return await page.$eval(selector, (node: HTMLInputElement) => node.value)
   }
 
   async function html(selector: string) {
@@ -58,17 +56,14 @@ export function setupPuppeteer() {
   }
 
   async function isVisible(selector: string) {
-    const display = await page.$eval(selector, node => {
+    const display = await page.$eval(selector, (node: HTMLElement) => {
       return window.getComputedStyle(node).display
     })
     return display !== 'none'
   }
 
   async function isChecked(selector: string) {
-    return await page.$eval(
-      selector,
-      node => (node as HTMLInputElement).checked
-    )
+    return await page.$eval(selector, (node: HTMLInputElement) => node.checked)
   }
 
   async function isFocused(selector: string) {
@@ -77,13 +72,13 @@ export function setupPuppeteer() {
 
   async function setValue(selector: string, value: string) {
     const el = (await page.$(selector))!
-    await el.evaluate(node => ((node as HTMLInputElement).value = ''))
+    await el.evaluate((node: HTMLInputElement) => (node.value = ''))
     await el.type(value)
   }
 
   async function enterValue(selector: string, value: string) {
     const el = (await page.$(selector))!
-    await el.evaluate(node => ((node as HTMLInputElement).value = ''))
+    await el.evaluate((node: HTMLInputElement) => (node.value = ''))
     await el.type(value)
     await el.press('Enter')
   }
@@ -91,7 +86,7 @@ export function setupPuppeteer() {
   async function clearValue(selector: string) {
     return await page.$eval(
       selector,
-      node => ((node as HTMLInputElement).value = '')
+      (node: HTMLInputElement) => (node.value = '')
     )
   }
 

@@ -4,7 +4,7 @@ import {
   CompilerOptions,
   ElementNode,
   NodeTypes,
-  VNodeCall
+  CallExpression
 } from '@vue/compiler-core'
 import { transformBind } from '../../../compiler-core/src/transforms/vBind'
 import { transformElement } from '../../../compiler-core/src/transforms/transformElement'
@@ -26,8 +26,17 @@ function transformWithStyleTransform(
 }
 
 describe('compiler: style transform', () => {
-  test('should transform into directive node', () => {
-    const { node } = transformWithStyleTransform(`<div style="color: red"/>`)
+  test('should transform into directive node and hoist value', () => {
+    const { root, node } = transformWithStyleTransform(
+      `<div style="color: red"/>`
+    )
+    expect(root.hoists).toMatchObject([
+      {
+        type: NodeTypes.SIMPLE_EXPRESSION,
+        content: `{"color":"red"}`,
+        isStatic: false
+      }
+    ])
     expect(node.props[0]).toMatchObject({
       type: NodeTypes.DIRECTIVE,
       name: `bind`,
@@ -38,7 +47,7 @@ describe('compiler: style transform', () => {
       },
       exp: {
         type: NodeTypes.SIMPLE_EXPRESSION,
-        content: `{"color":"red"}`,
+        content: `_hoisted_1`,
         isStatic: false
       }
     })
@@ -51,7 +60,7 @@ describe('compiler: style transform', () => {
         bind: transformBind
       }
     })
-    expect((node.codegenNode as VNodeCall).props).toMatchObject({
+    expect((node.codegenNode as CallExpression).arguments[1]).toMatchObject({
       type: NodeTypes.JS_OBJECT_EXPRESSION,
       properties: [
         {
@@ -62,13 +71,13 @@ describe('compiler: style transform', () => {
           },
           value: {
             type: NodeTypes.SIMPLE_EXPRESSION,
-            content: `{"color":"red"}`,
+            content: `_hoisted_1`,
             isStatic: false
           }
         }
       ]
     })
     // should not cause the STYLE patchFlag to be attached
-    expect((node.codegenNode as VNodeCall).patchFlag).toBeUndefined()
+    expect((node.codegenNode as CallExpression).arguments.length).toBe(2)
   })
 })

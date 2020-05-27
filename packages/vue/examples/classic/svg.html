@@ -97,15 +97,14 @@ const globalStats = [
   { label: 'E', value: 100 },
   { label: 'F', value: 100 }
 ]
-
-Vue.createApp({
+const App = {
   components: {
     Polygraph
   },
-  data: () => ({
+  data: {
     newLabel: '',
     stats: globalStats
-  }),
+  },
   methods: {
     add(e) {
       e.preventDefault()
@@ -124,7 +123,9 @@ Vue.createApp({
       }
     }
   }
-}).mount('#demo')
+}
+
+Vue.createApp().mount(App, '#demo')
 </script>
 
 <style>

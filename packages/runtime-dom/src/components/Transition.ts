@@ -7,13 +7,13 @@ import {
   getCurrentInstance,
   callWithAsyncErrorHandling
 } from '@vue/runtime-core'
-import { isObject, toNumber } from '@vue/shared'
+import { isObject } from '@vue/shared'
 import { ErrorCodes } from 'packages/runtime-core/src/errorHandling'
 
 const TRANSITION = 'transition'
 const ANIMATION = 'animation'
 
-export interface TransitionProps extends BaseTransitionProps<Element> {
+export interface TransitionProps extends BaseTransitionProps {
   name?: string
   type?: typeof TRANSITION | typeof ANIMATION
   css?: boolean
@@ -37,9 +37,7 @@ export const Transition: FunctionalComponent<TransitionProps> = (
   { slots }
 ) => h(BaseTransition, resolveTransitionProps(props), slots)
 
-Transition.inheritRef = true
-
-export const TransitionPropsValidators = (Transition.props = {
+export const TransitionPropsValidators = {
   ...(BaseTransition as any).props,
   name: String,
   type: String,
@@ -47,7 +45,7 @@ export const TransitionPropsValidators = (Transition.props = {
     type: Boolean,
     default: true
   },
-  duration: [String, Number, Object],
+  duration: Object,
   enterFromClass: String,
   enterActiveClass: String,
   enterToClass: String,
@@ -57,7 +55,11 @@ export const TransitionPropsValidators = (Transition.props = {
   leaveFromClass: String,
   leaveActiveClass: String,
   leaveToClass: String
-})
+}
+
+if (__DEV__) {
+  Transition.props = TransitionPropsValidators
+}
 
 export function resolveTransitionProps({
   name = 'v',
@@ -74,12 +76,11 @@ export function resolveTransitionProps({
   leaveActiveClass = `${name}-leave-active`,
   leaveToClass = `${name}-leave-to`,
   ...baseProps
-}: TransitionProps): BaseTransitionProps<Element> {
+}: TransitionProps): BaseTransitionProps {
   if (!css) {
     return baseProps
   }
 
-  const originEnterClass = [enterFromClass, enterActiveClass, enterToClass]
   const instance = getCurrentInstance()!
   const durations = normalizeDuration(duration)
   const enterDuration = durations && durations[0]
@@ -87,22 +88,18 @@ export function resolveTransitionProps({
   const { appear, onBeforeEnter, onEnter, onLeave } = baseProps
 
   // is appearing
-  if (appear && !instance.isMounted) {
+  if (appear && !getCurrentInstance()!.isMounted) {
     enterFromClass = appearFromClass
     enterActiveClass = appearActiveClass
     enterToClass = appearToClass
   }
 
-  type Hook = (el: Element, done?: () => void) => void
+  type Hook = (el: HTMLElement, done?: () => void) => void
 
   const finishEnter: Hook = (el, done) => {
     removeTransitionClass(el, enterToClass)
     removeTransitionClass(el, enterActiveClass)
     done && done()
-    // reset enter class
-    if (appear) {
-      ;[enterFromClass, enterActiveClass, enterToClass] = originEnterClass
-    }
   }
 
   const finishLeave: Hook = (el, done) => {
@@ -127,7 +124,7 @@ export function resolveTransitionProps({
     onEnter(el, done) {
       nextFrame(() => {
         const resolve = () => finishEnter(el, done)
-        onEnter && callHookWithErrorHandling(onEnter as Hook, [el, resolve])
+        onEnter && callHookWithErrorHandling(onEnter, [el, resolve])
         removeTransitionClass(el, enterFromClass)
         addTransitionClass(el, enterToClass)
         if (!(onEnter && onEnter.length > 1)) {
@@ -144,7 +141,7 @@ export function resolveTransitionProps({
       addTransitionClass(el, leaveFromClass)
       nextFrame(() => {
         const resolve = () => finishLeave(el, done)
-        onLeave && callHookWithErrorHandling(onLeave as Hook, [el, resolve])
+        onLeave && callHookWithErrorHandling(onLeave, [el, resolve])
         removeTransitionClass(el, leaveFromClass)
         addTransitionClass(el, leaveToClass)
         if (!(onLeave && onLeave.length > 1)) {
@@ -167,15 +164,15 @@ function normalizeDuration(
   if (duration == null) {
     return null
   } else if (isObject(duration)) {
-    return [NumberOf(duration.enter), NumberOf(duration.leave)]
+    return [toNumber(duration.enter), toNumber(duration.leave)]
   } else {
-    const n = NumberOf(duration)
+    const n = toNumber(duration)
     return [n, n]
   }
 }
 
-function NumberOf(val: unknown): number {
-  const res = toNumber(val)
+function toNumber(val: unknown): number {
+  const res = Number(val || 0)
   if (__DEV__) validateDuration(res)
   return res
 }
@@ -202,21 +199,17 @@ export interface ElementWithTransition extends HTMLElement {
   _vtc?: Set<string>
 }
 
-export function addTransitionClass(el: Element, cls: string) {
-  cls.split(/\s+/).forEach(c => c && el.classList.add(c))
-  ;(
-    (el as ElementWithTransition)._vtc ||
-    ((el as ElementWithTransition)._vtc = new Set())
-  ).add(cls)
+export function addTransitionClass(el: ElementWithTransition, cls: string) {
+  el.classList.add(cls)
+  ;(el._vtc || (el._vtc = new Set())).add(cls)
 }
 
-export function removeTransitionClass(el: Element, cls: string) {
-  cls.split(/\s+/).forEach(c => c && el.classList.remove(c))
-  const { _vtc } = el as ElementWithTransition
-  if (_vtc) {
-    _vtc.delete(cls)
-    if (!_vtc!.size) {
-      ;(el as ElementWithTransition)._vtc = undefined
+export function removeTransitionClass(el: ElementWithTransition, cls: string) {
+  el.classList.remove(cls)
+  if (el._vtc) {
+    el._vtc.delete(cls)
+    if (!el._vtc!.size) {
+      el._vtc = undefined
     }
   }
 }

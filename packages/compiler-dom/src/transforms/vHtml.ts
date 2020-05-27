@@ -24,6 +24,7 @@ export const transformVHtml: DirectiveTransform = (dir, node, context) => {
         createSimpleExpression(`innerHTML`, true, loc),
         exp || createSimpleExpression('', true)
       )
-    ]
+    ],
+    needRuntime: false
   }
 }

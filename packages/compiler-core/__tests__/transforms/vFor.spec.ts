@@ -12,11 +12,19 @@ import {
   SimpleExpressionNode,
   ElementNode,
   InterpolationNode,
-  ForCodegenNode
+  CallExpression,
+  SequenceExpression
 } from '../../src/ast'
 import { ErrorCodes } from '../../src/errors'
 import { CompilerOptions, generate } from '../../src'
-import { FRAGMENT, RENDER_LIST, RENDER_SLOT } from '../../src/runtimeHelpers'
+import {
+  OPEN_BLOCK,
+  CREATE_BLOCK,
+  FRAGMENT,
+  RENDER_LIST,
+  RENDER_SLOT,
+  WITH_DIRECTIVES
+} from '../../src/runtimeHelpers'
 import { PatchFlags } from '@vue/shared'
 import { createObjectMatcher, genFlagText } from '../testUtils'
 
@@ -40,7 +48,7 @@ function parseWithForTransform(
   })
   return {
     root: ast,
-    node: ast.children[0] as ForNode & { codegenNode: ForCodegenNode }
+    node: ast.children[0] as ForNode
   }
 }
 
@@ -558,40 +566,64 @@ describe('compiler: v-for', () => {
 
   describe('codegen', () => {
     function assertSharedCodegen(
-      node: ForCodegenNode,
+      node: SequenceExpression,
       keyed: boolean = false,
       customReturn: boolean = false
     ) {
       expect(node).toMatchObject({
-        type: NodeTypes.VNODE_CALL,
-        tag: FRAGMENT,
-        isForBlock: true,
-        patchFlag: keyed
-          ? genFlagText(PatchFlags.KEYED_FRAGMENT)
-          : genFlagText(PatchFlags.UNKEYED_FRAGMENT),
-        children: {
-          type: NodeTypes.JS_CALL_EXPRESSION,
-          callee: RENDER_LIST,
-          arguments: [
-            {}, // to be asserted by each test
-            {
-              type: NodeTypes.JS_FUNCTION_EXPRESSION,
-              returns: customReturn
-                ? {}
-                : {
-                    type: NodeTypes.VNODE_CALL,
-                    isBlock: true
+        type: NodeTypes.JS_SEQUENCE_EXPRESSION,
+        expressions: [
+          {
+            type: NodeTypes.JS_CALL_EXPRESSION,
+            callee: OPEN_BLOCK
+          },
+          {
+            type: NodeTypes.JS_CALL_EXPRESSION,
+            callee: CREATE_BLOCK,
+            arguments: [
+              FRAGMENT,
+              `null`,
+              {
+                type: NodeTypes.JS_CALL_EXPRESSION,
+                callee: RENDER_LIST,
+                arguments: [
+                  {}, // to be asserted by each test
+                  {
+                    type: NodeTypes.JS_FUNCTION_EXPRESSION,
+                    returns: customReturn
+                      ? {}
+                      : {
+                          type: NodeTypes.JS_SEQUENCE_EXPRESSION,
+                          expressions: [
+                            {
+                              type: NodeTypes.JS_CALL_EXPRESSION,
+                              callee: OPEN_BLOCK
+                            },
+                            {
+                              type: NodeTypes.JS_CALL_EXPRESSION,
+                              callee: CREATE_BLOCK
+                            }
+                          ]
+                        }
                   }
-            }
-          ]
-        }
+                ]
+              },
+              keyed
+                ? genFlagText(PatchFlags.KEYED_FRAGMENT)
+                : genFlagText(PatchFlags.UNKEYED_FRAGMENT)
+            ]
+          }
+        ]
       })
-      const renderListArgs = node.children.arguments
+      const renderListArgs = ((node.expressions[1] as CallExpression)
+        .arguments[2] as CallExpression).arguments
       return {
         source: renderListArgs[0] as SimpleExpressionNode,
         params: (renderListArgs[1] as any).params,
         returns: (renderListArgs[1] as any).returns,
-        innerVNodeCall: customReturn ? null : (renderListArgs[1] as any).returns
+        blockArgs: customReturn
+          ? null
+          : (renderListArgs[1] as any).returns.expressions[1].arguments
       }
     }
 
@@ -603,9 +635,7 @@ describe('compiler: v-for', () => {
       expect(assertSharedCodegen(codegenNode)).toMatchObject({
         source: { content: `items` },
         params: [{ content: `item` }],
-        innerVNodeCall: {
-          tag: `"span"`
-        }
+        blockArgs: [`"span"`]
       })
       expect(generate(root).code).toMatchSnapshot()
     })
@@ -668,16 +698,15 @@ describe('compiler: v-for', () => {
       expect(assertSharedCodegen(codegenNode)).toMatchObject({
         source: { content: `items` },
         params: [{ content: `item` }],
-        innerVNodeCall: {
-          tag: FRAGMENT,
-          props: undefined,
-          isBlock: true,
-          children: [
+        blockArgs: [
+          FRAGMENT,
+          `null`,
+          [
             { type: NodeTypes.TEXT, content: `hello` },
             { type: NodeTypes.ELEMENT, tag: `span` }
           ],
-          patchFlag: genFlagText(PatchFlags.STABLE_FRAGMENT)
-        }
+          genFlagText(PatchFlags.STABLE_FRAGMENT)
+        ]
       })
       expect(generate(root).code).toMatchSnapshot()
     })
@@ -728,12 +757,12 @@ describe('compiler: v-for', () => {
       expect(assertSharedCodegen(codegenNode, true)).toMatchObject({
         source: { content: `items` },
         params: [{ content: `item` }],
-        innerVNodeCall: {
-          tag: `"span"`,
-          props: createObjectMatcher({
+        blockArgs: [
+          `"span"`,
+          createObjectMatcher({
             key: `[item]`
           })
-        }
+        ]
       })
       expect(generate(root).code).toMatchSnapshot()
     })
@@ -748,17 +777,17 @@ describe('compiler: v-for', () => {
       expect(assertSharedCodegen(codegenNode, true)).toMatchObject({
         source: { content: `items` },
         params: [{ content: `item` }],
-        innerVNodeCall: {
-          tag: FRAGMENT,
-          props: createObjectMatcher({
+        blockArgs: [
+          FRAGMENT,
+          createObjectMatcher({
             key: `[item]`
           }),
-          children: [
+          [
             { type: NodeTypes.TEXT, content: `hello` },
             { type: NodeTypes.ELEMENT, tag: `span` }
           ],
-          patchFlag: genFlagText(PatchFlags.STABLE_FRAGMENT)
-        }
+          genFlagText(PatchFlags.STABLE_FRAGMENT)
+        ]
       })
       expect(generate(root).code).toMatchSnapshot()
     })
@@ -769,33 +798,53 @@ describe('compiler: v-for', () => {
         node: { codegenNode }
       } = parseWithForTransform(`<div v-if="ok" v-for="i in list"/>`)
       expect(codegenNode).toMatchObject({
-        type: NodeTypes.JS_CONDITIONAL_EXPRESSION,
-        test: { content: `ok` },
-        consequent: {
-          type: NodeTypes.VNODE_CALL,
-          props: createObjectMatcher({
-            key: `[0]`
-          }),
-          isBlock: true,
-          isForBlock: true,
-          patchFlag: genFlagText(PatchFlags.UNKEYED_FRAGMENT),
-          children: {
+        type: NodeTypes.JS_SEQUENCE_EXPRESSION,
+        expressions: [
+          {
             type: NodeTypes.JS_CALL_EXPRESSION,
-            callee: RENDER_LIST,
-            arguments: [
-              { content: `list` },
-              {
-                type: NodeTypes.JS_FUNCTION_EXPRESSION,
-                params: [{ content: `i` }],
-                returns: {
-                  type: NodeTypes.VNODE_CALL,
-                  tag: `"div"`,
-                  isBlock: true
-                }
-              }
-            ]
+            callee: OPEN_BLOCK,
+            arguments: []
+          },
+          {
+            type: NodeTypes.JS_CONDITIONAL_EXPRESSION,
+            test: { content: `ok` },
+            consequent: {
+              type: NodeTypes.JS_CALL_EXPRESSION,
+              callee: CREATE_BLOCK,
+              // should optimize v-if + v-for into a single Fragment block
+              arguments: [
+                FRAGMENT,
+                createObjectMatcher({ key: `[0]` }),
+                {
+                  type: NodeTypes.JS_CALL_EXPRESSION,
+                  callee: RENDER_LIST,
+                  arguments: [
+                    { content: `list` },
+                    {
+                      type: NodeTypes.JS_FUNCTION_EXPRESSION,
+                      params: [{ content: `i` }],
+                      returns: {
+                        type: NodeTypes.JS_SEQUENCE_EXPRESSION,
+                        expressions: [
+                          {
+                            type: NodeTypes.JS_CALL_EXPRESSION,
+                            callee: OPEN_BLOCK
+                          },
+                          {
+                            type: NodeTypes.JS_CALL_EXPRESSION,
+                            callee: CREATE_BLOCK,
+                            arguments: [`"div"`]
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                },
+                genFlagText(PatchFlags.UNKEYED_FRAGMENT)
+              ]
+            }
           }
-        }
+        ]
       })
       expect(generate(root).code).toMatchSnapshot()
     })
@@ -807,8 +856,18 @@ describe('compiler: v-for', () => {
       } = parseWithForTransform('<div v-for="i in list" v-foo/>')
       const { returns } = assertSharedCodegen(codegenNode, false, true)
       expect(returns).toMatchObject({
-        type: NodeTypes.VNODE_CALL,
-        directives: { type: NodeTypes.JS_ARRAY_EXPRESSION }
+        type: NodeTypes.JS_SEQUENCE_EXPRESSION,
+        expressions: [
+          { callee: OPEN_BLOCK },
+          // should wrap withDirectives() around createBlock()
+          {
+            callee: WITH_DIRECTIVES,
+            arguments: [
+              { callee: CREATE_BLOCK },
+              { type: NodeTypes.JS_ARRAY_EXPRESSION }
+            ]
+          }
+        ]
       })
       expect(generate(root).code).toMatchSnapshot()
     })

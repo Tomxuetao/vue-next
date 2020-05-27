@@ -12,9 +12,9 @@ import {
   NodeOpTypes,
   nextTick,
   serialize,
-  triggerEvent
+  triggerEvent,
+  mockWarn
 } from '../src'
-import { mockWarn } from '@vue/shared'
 
 describe('test renderer', () => {
   mockWarn()

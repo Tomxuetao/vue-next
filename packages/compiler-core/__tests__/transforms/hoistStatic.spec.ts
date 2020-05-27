@@ -3,13 +3,16 @@ import {
   transform,
   NodeTypes,
   generate,
-  CompilerOptions,
-  VNodeCall,
-  IfNode,
-  ElementNode,
-  ForNode
+  CompilerOptions
 } from '../../src'
-import { FRAGMENT, RENDER_LIST, CREATE_TEXT } from '../../src/runtimeHelpers'
+import {
+  OPEN_BLOCK,
+  CREATE_BLOCK,
+  CREATE_VNODE,
+  WITH_DIRECTIVES,
+  FRAGMENT,
+  RENDER_LIST
+} from '../../src/runtimeHelpers'
 import { transformElement } from '../../src/transforms/transformElement'
 import { transformExpression } from '../../src/transforms/transformExpression'
 import { transformIf } from '../../src/transforms/vIf'
@@ -17,7 +20,6 @@ import { transformFor } from '../../src/transforms/vFor'
 import { transformBind } from '../../src/transforms/vBind'
 import { transformOn } from '../../src/transforms/vOn'
 import { createObjectMatcher, genFlagText } from '../testUtils'
-import { transformText } from '../../src/transforms/transformText'
 import { PatchFlags } from '@vue/shared'
 
 function transformWithHoist(template: string, options: CompilerOptions = {}) {
@@ -28,8 +30,7 @@ function transformWithHoist(template: string, options: CompilerOptions = {}) {
       transformIf,
       transformFor,
       ...(options.prefixIdentifiers ? [transformExpression] : []),
-      transformElement,
-      transformText
+      transformElement
     ],
     directiveTransforms: {
       on: transformOn,
@@ -38,43 +39,56 @@ function transformWithHoist(template: string, options: CompilerOptions = {}) {
     ...options
   })
   expect(ast.codegenNode).toMatchObject({
-    type: NodeTypes.VNODE_CALL,
-    isBlock: true
+    type: NodeTypes.JS_SEQUENCE_EXPRESSION,
+    expressions: [
+      {
+        type: NodeTypes.JS_CALL_EXPRESSION,
+        callee: OPEN_BLOCK
+      },
+      {
+        type: NodeTypes.JS_CALL_EXPRESSION,
+        callee: CREATE_BLOCK
+      }
+    ]
   })
-  return ast
+  return {
+    root: ast,
+    args: (ast.codegenNode as any).expressions[1].arguments
+  }
 }
 
 describe('compiler: hoistStatic transform', () => {
   test('should NOT hoist root node', () => {
     // if the whole tree is static, the root still needs to be a block
     // so that it's patched in optimized mode to skip children
-    const root = transformWithHoist(`<div/>`)
+    const { root, args } = transformWithHoist(`<div/>`)
     expect(root.hoists.length).toBe(0)
-    expect(root.codegenNode).toMatchObject({
-      tag: `"div"`
-    })
+    expect(args).toEqual([`"div"`])
     expect(generate(root).code).toMatchSnapshot()
   })
 
   test('hoist simple element', () => {
-    const root = transformWithHoist(
+    const { root, args } = transformWithHoist(
       `<div><span class="inline">hello</span></div>`
     )
     expect(root.hoists).toMatchObject([
       {
-        type: NodeTypes.VNODE_CALL,
-        tag: `"span"`,
-        props: createObjectMatcher({ class: 'inline' }),
-        children: {
-          type: NodeTypes.TEXT,
-          content: `hello`
-        }
+        type: NodeTypes.JS_CALL_EXPRESSION,
+        callee: CREATE_VNODE,
+        arguments: [
+          `"span"`,
+          createObjectMatcher({ class: 'inline' }),
+          {
+            type: NodeTypes.TEXT,
+            content: `hello`
+          }
+        ]
       }
     ])
-    expect(root.codegenNode).toMatchObject({
-      tag: `"div"`,
-      props: undefined,
-      children: [
+    expect(args).toMatchObject([
+      `"div"`,
+      `null`,
+      [
         {
           type: NodeTypes.ELEMENT,
           codegenNode: {
@@ -83,24 +97,29 @@ describe('compiler: hoistStatic transform', () => {
           }
         }
       ]
-    })
+    ])
     expect(generate(root).code).toMatchSnapshot()
   })
 
   test('hoist nested static tree', () => {
-    const root = transformWithHoist(`<div><p><span/><span/></p></div>`)
+    const { root, args } = transformWithHoist(
+      `<div><p><span/><span/></p></div>`
+    )
     expect(root.hoists).toMatchObject([
       {
-        type: NodeTypes.VNODE_CALL,
-        tag: `"p"`,
-        props: undefined,
-        children: [
-          { type: NodeTypes.ELEMENT, tag: `span` },
-          { type: NodeTypes.ELEMENT, tag: `span` }
+        type: NodeTypes.JS_CALL_EXPRESSION,
+        callee: CREATE_VNODE,
+        arguments: [
+          `"p"`,
+          `null`,
+          [
+            { type: NodeTypes.ELEMENT, tag: `span` },
+            { type: NodeTypes.ELEMENT, tag: `span` }
+          ]
         ]
       }
     ])
-    expect((root.codegenNode as VNodeCall).children).toMatchObject([
+    expect(args[2]).toMatchObject([
       {
         type: NodeTypes.ELEMENT,
         codegenNode: {
@@ -113,16 +132,21 @@ describe('compiler: hoistStatic transform', () => {
   })
 
   test('hoist nested static tree with comments', () => {
-    const root = transformWithHoist(`<div><div><!--comment--></div></div>`)
+    const { root, args } = transformWithHoist(
+      `<div><div><!--comment--></div></div>`
+    )
     expect(root.hoists).toMatchObject([
       {
-        type: NodeTypes.VNODE_CALL,
-        tag: `"div"`,
-        props: undefined,
-        children: [{ type: NodeTypes.COMMENT, content: `comment` }]
+        type: NodeTypes.JS_CALL_EXPRESSION,
+        callee: CREATE_VNODE,
+        arguments: [
+          `"div"`,
+          `null`,
+          [{ type: NodeTypes.COMMENT, content: `comment` }]
+        ]
       }
     ])
-    expect((root.codegenNode as VNodeCall).children).toMatchObject([
+    expect(args[2]).toMatchObject([
       {
         type: NodeTypes.ELEMENT,
         codegenNode: {
@@ -135,18 +159,20 @@ describe('compiler: hoistStatic transform', () => {
   })
 
   test('hoist siblings with common non-hoistable parent', () => {
-    const root = transformWithHoist(`<div><span/><div/></div>`)
+    const { root, args } = transformWithHoist(`<div><span/><div/></div>`)
     expect(root.hoists).toMatchObject([
       {
-        type: NodeTypes.VNODE_CALL,
-        tag: `"span"`
+        type: NodeTypes.JS_CALL_EXPRESSION,
+        callee: CREATE_VNODE,
+        arguments: [`"span"`]
       },
       {
-        type: NodeTypes.VNODE_CALL,
-        tag: `"div"`
+        type: NodeTypes.JS_CALL_EXPRESSION,
+        callee: CREATE_VNODE,
+        arguments: [`"div"`]
       }
     ])
-    expect((root.codegenNode as VNodeCall).children).toMatchObject([
+    expect(args[2]).toMatchObject([
       {
         type: NodeTypes.ELEMENT,
         codegenNode: {
@@ -166,14 +192,14 @@ describe('compiler: hoistStatic transform', () => {
   })
 
   test('should NOT hoist components', () => {
-    const root = transformWithHoist(`<div><Comp/></div>`)
+    const { root, args } = transformWithHoist(`<div><Comp/></div>`)
     expect(root.hoists.length).toBe(0)
-    expect((root.codegenNode as VNodeCall).children).toMatchObject([
+    expect(args[2]).toMatchObject([
       {
         type: NodeTypes.ELEMENT,
         codegenNode: {
-          type: NodeTypes.VNODE_CALL,
-          tag: `_component_Comp`
+          callee: CREATE_VNODE,
+          arguments: [`_component_Comp`]
         }
       }
     ])
@@ -181,20 +207,22 @@ describe('compiler: hoistStatic transform', () => {
   })
 
   test('should NOT hoist element with dynamic props', () => {
-    const root = transformWithHoist(`<div><div :id="foo"/></div>`)
+    const { root, args } = transformWithHoist(`<div><div :id="foo"/></div>`)
     expect(root.hoists.length).toBe(0)
-    expect((root.codegenNode as VNodeCall).children).toMatchObject([
+    expect(args[2]).toMatchObject([
       {
         type: NodeTypes.ELEMENT,
         codegenNode: {
-          type: NodeTypes.VNODE_CALL,
-          tag: `"div"`,
-          props: createObjectMatcher({
-            id: `[foo]`
-          }),
-          children: undefined,
-          patchFlag: genFlagText(PatchFlags.PROPS),
-          dynamicProps: `["id"]`
+          callee: CREATE_VNODE,
+          arguments: [
+            `"div"`,
+            createObjectMatcher({
+              id: `[foo]`
+            }),
+            `null`,
+            genFlagText(PatchFlags.PROPS),
+            `["id"]`
+          ]
         }
       }
     ])
@@ -202,19 +230,19 @@ describe('compiler: hoistStatic transform', () => {
   })
 
   test('hoist element with static key', () => {
-    const root = transformWithHoist(`<div><div key="foo"/></div>`)
+    const { root, args } = transformWithHoist(`<div><div key="foo"/></div>`)
     expect(root.hoists.length).toBe(1)
     expect(root.hoists).toMatchObject([
       {
-        type: NodeTypes.VNODE_CALL,
-        tag: `"div"`,
-        props: createObjectMatcher({ key: 'foo' })
+        type: NodeTypes.JS_CALL_EXPRESSION,
+        callee: CREATE_VNODE,
+        arguments: [`"div"`, createObjectMatcher({ key: 'foo' })]
       }
     ])
-    expect(root.codegenNode).toMatchObject({
-      tag: `"div"`,
-      props: undefined,
-      children: [
+    expect(args).toMatchObject([
+      `"div"`,
+      `null`,
+      [
         {
           type: NodeTypes.ELEMENT,
           codegenNode: {
@@ -223,22 +251,24 @@ describe('compiler: hoistStatic transform', () => {
           }
         }
       ]
-    })
+    ])
     expect(generate(root).code).toMatchSnapshot()
   })
 
   test('should NOT hoist element with dynamic key', () => {
-    const root = transformWithHoist(`<div><div :key="foo"/></div>`)
+    const { root, args } = transformWithHoist(`<div><div :key="foo"/></div>`)
     expect(root.hoists.length).toBe(0)
-    expect((root.codegenNode as VNodeCall).children).toMatchObject([
+    expect(args[2]).toMatchObject([
       {
         type: NodeTypes.ELEMENT,
         codegenNode: {
-          type: NodeTypes.VNODE_CALL,
-          tag: `"div"`,
-          props: createObjectMatcher({
-            key: `[foo]`
-          })
+          callee: CREATE_VNODE,
+          arguments: [
+            `"div"`,
+            createObjectMatcher({
+              key: `[foo]`
+            })
+          ]
         }
       }
     ])
@@ -246,19 +276,21 @@ describe('compiler: hoistStatic transform', () => {
   })
 
   test('should NOT hoist element with dynamic ref', () => {
-    const root = transformWithHoist(`<div><div :ref="foo"/></div>`)
+    const { root, args } = transformWithHoist(`<div><div :ref="foo"/></div>`)
     expect(root.hoists.length).toBe(0)
-    expect((root.codegenNode as VNodeCall).children).toMatchObject([
+    expect(args[2]).toMatchObject([
       {
         type: NodeTypes.ELEMENT,
         codegenNode: {
-          type: NodeTypes.VNODE_CALL,
-          tag: `"div"`,
-          props: createObjectMatcher({
-            ref: `[foo]`
-          }),
-          children: undefined,
-          patchFlag: genFlagText(PatchFlags.NEED_PATCH)
+          callee: CREATE_VNODE,
+          arguments: [
+            `"div"`,
+            createObjectMatcher({
+              ref: `[foo]`
+            }),
+            `null`,
+            genFlagText(PatchFlags.NEED_PATCH)
+          ]
         }
       }
     ])
@@ -266,23 +298,32 @@ describe('compiler: hoistStatic transform', () => {
   })
 
   test('hoist static props for elements with directives', () => {
-    const root = transformWithHoist(`<div><div id="foo" v-foo/></div>`)
+    const { root, args } = transformWithHoist(
+      `<div><div id="foo" v-foo/></div>`
+    )
     expect(root.hoists).toMatchObject([createObjectMatcher({ id: 'foo' })])
-    expect((root.codegenNode as VNodeCall).children).toMatchObject([
+    expect(args[2]).toMatchObject([
       {
         type: NodeTypes.ELEMENT,
         codegenNode: {
-          type: NodeTypes.VNODE_CALL,
-          tag: `"div"`,
-          props: {
-            type: NodeTypes.SIMPLE_EXPRESSION,
-            content: `_hoisted_1`
-          },
-          children: undefined,
-          patchFlag: genFlagText(PatchFlags.NEED_PATCH),
-          directives: {
-            type: NodeTypes.JS_ARRAY_EXPRESSION
-          }
+          callee: WITH_DIRECTIVES,
+          arguments: [
+            {
+              callee: CREATE_VNODE,
+              arguments: [
+                `"div"`,
+                {
+                  type: NodeTypes.SIMPLE_EXPRESSION,
+                  content: `_hoisted_1`
+                },
+                `null`,
+                genFlagText(PatchFlags.NEED_PATCH)
+              ]
+            },
+            {
+              type: NodeTypes.JS_ARRAY_EXPRESSION
+            }
+          ]
         }
       }
     ])
@@ -290,19 +331,21 @@ describe('compiler: hoistStatic transform', () => {
   })
 
   test('hoist static props for elements with dynamic text children', () => {
-    const root = transformWithHoist(
+    const { root, args } = transformWithHoist(
       `<div><div id="foo">{{ hello }}</div></div>`
     )
     expect(root.hoists).toMatchObject([createObjectMatcher({ id: 'foo' })])
-    expect((root.codegenNode as VNodeCall).children).toMatchObject([
+    expect(args[2]).toMatchObject([
       {
         type: NodeTypes.ELEMENT,
         codegenNode: {
-          type: NodeTypes.VNODE_CALL,
-          tag: `"div"`,
-          props: { content: `_hoisted_1` },
-          children: { type: NodeTypes.INTERPOLATION },
-          patchFlag: genFlagText(PatchFlags.TEXT)
+          callee: CREATE_VNODE,
+          arguments: [
+            `"div"`,
+            { content: `_hoisted_1` },
+            { type: NodeTypes.INTERPOLATION },
+            genFlagText(PatchFlags.TEXT)
+          ]
         }
       }
     ])
@@ -310,16 +353,20 @@ describe('compiler: hoistStatic transform', () => {
   })
 
   test('hoist static props for elements with unhoistable children', () => {
-    const root = transformWithHoist(`<div><div id="foo"><Comp/></div></div>`)
+    const { root, args } = transformWithHoist(
+      `<div><div id="foo"><Comp/></div></div>`
+    )
     expect(root.hoists).toMatchObject([createObjectMatcher({ id: 'foo' })])
-    expect((root.codegenNode as VNodeCall).children).toMatchObject([
+    expect(args[2]).toMatchObject([
       {
         type: NodeTypes.ELEMENT,
         codegenNode: {
-          type: NodeTypes.VNODE_CALL,
-          tag: `"div"`,
-          props: { content: `_hoisted_1` },
-          children: [{ type: NodeTypes.ELEMENT, tag: `Comp` }]
+          callee: CREATE_VNODE,
+          arguments: [
+            `"div"`,
+            { content: `_hoisted_1` },
+            [{ type: NodeTypes.ELEMENT, tag: `Comp` }]
+          ]
         }
       }
     ])
@@ -327,7 +374,7 @@ describe('compiler: hoistStatic transform', () => {
   })
 
   test('should hoist v-if props/children if static', () => {
-    const root = transformWithHoist(
+    const { root, args } = transformWithHoist(
       `<div><div v-if="ok" id="foo"><span/></div></div>`
     )
     expect(root.hoists).toMatchObject([
@@ -336,31 +383,37 @@ describe('compiler: hoistStatic transform', () => {
         id: 'foo'
       }),
       {
-        type: NodeTypes.VNODE_CALL,
-        tag: `"span"`
+        callee: CREATE_VNODE,
+        arguments: [`"span"`]
       }
     ])
-    expect(
-      ((root.children[0] as ElementNode).children[0] as IfNode).codegenNode
-    ).toMatchObject({
-      type: NodeTypes.JS_CONDITIONAL_EXPRESSION,
-      consequent: {
-        // blocks should NOT be hoisted
-        type: NodeTypes.VNODE_CALL,
-        tag: `"div"`,
-        props: { content: `_hoisted_1` },
-        children: [
-          {
-            codegenNode: { content: `_hoisted_2` }
+    expect(args[2][0].codegenNode).toMatchObject({
+      type: NodeTypes.JS_SEQUENCE_EXPRESSION,
+      expressions: [
+        { callee: OPEN_BLOCK },
+        {
+          type: NodeTypes.JS_CONDITIONAL_EXPRESSION,
+          consequent: {
+            // blocks should NOT be hoisted
+            callee: CREATE_BLOCK,
+            arguments: [
+              `"div"`,
+              { content: `_hoisted_1` },
+              [
+                {
+                  codegenNode: { content: `_hoisted_2` }
+                }
+              ]
+            ]
           }
-        ]
-      }
+        }
+      ]
     })
     expect(generate(root).code).toMatchSnapshot()
   })
 
   test('should hoist v-for children if static', () => {
-    const root = transformWithHoist(
+    const { root, args } = transformWithHoist(
       `<div><div v-for="i in list" id="foo"><span/></div></div>`
     )
     expect(root.hoists).toMatchObject([
@@ -368,58 +421,55 @@ describe('compiler: hoistStatic transform', () => {
         id: 'foo'
       }),
       {
-        type: NodeTypes.VNODE_CALL,
-        tag: `"span"`
+        callee: CREATE_VNODE,
+        arguments: [`"span"`]
       }
     ])
-    const forBlockCodegen = ((root.children[0] as ElementNode)
-      .children[0] as ForNode).codegenNode
+    const forBlockCodegen = args[2][0].codegenNode
     expect(forBlockCodegen).toMatchObject({
-      type: NodeTypes.VNODE_CALL,
-      tag: FRAGMENT,
-      props: undefined,
-      children: {
-        type: NodeTypes.JS_CALL_EXPRESSION,
-        callee: RENDER_LIST
-      },
-      patchFlag: genFlagText(PatchFlags.UNKEYED_FRAGMENT)
-    })
-    const innerBlockCodegen = forBlockCodegen!.children.arguments[1]
-    expect(innerBlockCodegen.returns).toMatchObject({
-      type: NodeTypes.VNODE_CALL,
-      tag: `"div"`,
-      props: { content: `_hoisted_1` },
-      children: [
+      type: NodeTypes.JS_SEQUENCE_EXPRESSION,
+      expressions: [
+        { callee: OPEN_BLOCK },
         {
-          codegenNode: { content: `_hoisted_2` }
+          callee: CREATE_BLOCK,
+          arguments: [
+            FRAGMENT,
+            `null`,
+            {
+              type: NodeTypes.JS_CALL_EXPRESSION,
+              callee: RENDER_LIST
+            },
+            genFlagText(PatchFlags.UNKEYED_FRAGMENT)
+          ]
+        }
+      ]
+    })
+    const innerBlockCodegen =
+      forBlockCodegen.expressions[1].arguments[2].arguments[1].returns
+    expect(innerBlockCodegen).toMatchObject({
+      type: NodeTypes.JS_SEQUENCE_EXPRESSION,
+      expressions: [
+        { callee: OPEN_BLOCK },
+        {
+          callee: CREATE_BLOCK,
+          arguments: [
+            `"div"`,
+            { content: `_hoisted_1` },
+            [
+              {
+                codegenNode: { content: `_hoisted_2` }
+              }
+            ]
+          ]
         }
       ]
     })
     expect(generate(root).code).toMatchSnapshot()
   })
 
-  test('hoist static text node between elements', () => {
-    const root = transformWithHoist(`<div>static<div>static</div></div>`)
-    expect(root.hoists).toMatchObject([
-      {
-        callee: CREATE_TEXT,
-        arguments: [
-          {
-            type: NodeTypes.TEXT,
-            content: `static`
-          }
-        ]
-      },
-      {
-        type: NodeTypes.VNODE_CALL,
-        tag: `"div"`
-      }
-    ])
-  })
-
   describe('prefixIdentifiers', () => {
     test('hoist nested static tree with static interpolation', () => {
-      const root = transformWithHoist(
+      const { root, args } = transformWithHoist(
         `<div><span>foo {{ 1 }} {{ true }}</span></div>`,
         {
           prefixIdentifiers: true
@@ -427,18 +477,44 @@ describe('compiler: hoistStatic transform', () => {
       )
       expect(root.hoists).toMatchObject([
         {
-          type: NodeTypes.VNODE_CALL,
-          tag: `"span"`,
-          props: undefined,
-          children: {
-            type: NodeTypes.COMPOUND_EXPRESSION
-          }
+          type: NodeTypes.JS_CALL_EXPRESSION,
+          callee: CREATE_VNODE,
+          arguments: [
+            `"span"`,
+            `null`,
+            [
+              {
+                type: NodeTypes.TEXT,
+                content: `foo `
+              },
+              {
+                type: NodeTypes.INTERPOLATION,
+                content: {
+                  content: `1`,
+                  isStatic: false,
+                  isConstant: true
+                }
+              },
+              {
+                type: NodeTypes.TEXT,
+                content: ` `
+              },
+              {
+                type: NodeTypes.INTERPOLATION,
+                content: {
+                  content: `true`,
+                  isStatic: false,
+                  isConstant: true
+                }
+              }
+            ]
+          ]
         }
       ])
-      expect(root.codegenNode).toMatchObject({
-        tag: `"div"`,
-        props: undefined,
-        children: [
+      expect(args).toMatchObject([
+        `"div"`,
+        `null`,
+        [
           {
             type: NodeTypes.ELEMENT,
             codegenNode: {
@@ -447,12 +523,12 @@ describe('compiler: hoistStatic transform', () => {
             }
           }
         ]
-      })
+      ])
       expect(generate(root).code).toMatchSnapshot()
     })
 
     test('hoist nested static tree with static prop value', () => {
-      const root = transformWithHoist(
+      const { root, args } = transformWithHoist(
         `<div><span :foo="0">{{ 1 }}</span></div>`,
         {
           prefixIdentifiers: true
@@ -461,23 +537,26 @@ describe('compiler: hoistStatic transform', () => {
 
       expect(root.hoists).toMatchObject([
         {
-          type: NodeTypes.VNODE_CALL,
-          tag: `"span"`,
-          props: createObjectMatcher({ foo: `[0]` }),
-          children: {
-            type: NodeTypes.INTERPOLATION,
-            content: {
-              content: `1`,
-              isStatic: false,
-              isConstant: true
+          type: NodeTypes.JS_CALL_EXPRESSION,
+          callee: CREATE_VNODE,
+          arguments: [
+            `"span"`,
+            createObjectMatcher({ foo: `[0]` }),
+            {
+              type: NodeTypes.INTERPOLATION,
+              content: {
+                content: `1`,
+                isStatic: false,
+                isConstant: true
+              }
             }
-          }
+          ]
         }
       ])
-      expect(root.codegenNode).toMatchObject({
-        tag: `"div"`,
-        props: undefined,
-        children: [
+      expect(args).toMatchObject([
+        `"div"`,
+        `null`,
+        [
           {
             type: NodeTypes.ELEMENT,
             codegenNode: {
@@ -486,12 +565,12 @@ describe('compiler: hoistStatic transform', () => {
             }
           }
         ]
-      })
+      ])
       expect(generate(root).code).toMatchSnapshot()
     })
 
     test('hoist class with static object value', () => {
-      const root = transformWithHoist(
+      const { root, args } = transformWithHoist(
         `<div><span :class="{ foo: true }">{{ bar }}</span></div>`,
         {
           prefixIdentifiers: true
@@ -517,37 +596,39 @@ describe('compiler: hoistStatic transform', () => {
           ]
         }
       ])
-      expect(root.codegenNode).toMatchObject({
-        tag: `"div"`,
-        props: undefined,
-        children: [
+      expect(args).toMatchObject([
+        `"div"`,
+        `null`,
+        [
           {
             type: NodeTypes.ELEMENT,
             codegenNode: {
-              type: NodeTypes.VNODE_CALL,
-              tag: `"span"`,
-              props: {
-                type: NodeTypes.SIMPLE_EXPRESSION,
-                content: `_hoisted_1`
-              },
-              children: {
-                type: NodeTypes.INTERPOLATION,
-                content: {
-                  content: `_ctx.bar`,
-                  isConstant: false,
-                  isStatic: false
-                }
-              },
-              patchFlag: `1 /* TEXT */`
+              callee: CREATE_VNODE,
+              arguments: [
+                `"span"`,
+                {
+                  type: NodeTypes.SIMPLE_EXPRESSION,
+                  content: `_hoisted_1`
+                },
+                {
+                  type: NodeTypes.INTERPOLATION,
+                  content: {
+                    content: `_ctx.bar`,
+                    isConstant: false,
+                    isStatic: false
+                  }
+                },
+                `1 /* TEXT */`
+              ]
             }
           }
         ]
-      })
+      ])
       expect(generate(root).code).toMatchSnapshot()
     })
 
     test('should NOT hoist expressions that refer scope variables', () => {
-      const root = transformWithHoist(
+      const { root } = transformWithHoist(
         `<div><p v-for="o in list"><span>{{ o }}</span></p></div>`,
         {
           prefixIdentifiers: true
@@ -559,7 +640,7 @@ describe('compiler: hoistStatic transform', () => {
     })
 
     test('should NOT hoist expressions that refer scope variables (2)', () => {
-      const root = transformWithHoist(
+      const { root } = transformWithHoist(
         `<div><p v-for="o in list"><span>{{ o + 'foo' }}</span></p></div>`,
         {
           prefixIdentifiers: true
@@ -571,7 +652,7 @@ describe('compiler: hoistStatic transform', () => {
     })
 
     test('should NOT hoist expressions that refer scope variables (v-slot)', () => {
-      const root = transformWithHoist(
+      const { root } = transformWithHoist(
         `<Comp v-slot="{ foo }">{{ foo }}</Comp>`,
         {
           prefixIdentifiers: true
@@ -583,7 +664,7 @@ describe('compiler: hoistStatic transform', () => {
     })
 
     test('should NOT hoist elements with cached handlers', () => {
-      const root = transformWithHoist(
+      const { root } = transformWithHoist(
         `<div><div><div @click="foo"/></div></div>`,
         {
           prefixIdentifiers: true,

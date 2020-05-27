@@ -5,11 +5,12 @@ import {
   ElementNode,
   ObjectExpression,
   CompilerOptions,
+  CallExpression,
   ForNode,
   PlainElementNode,
+  PlainElementCodegenNode,
   ComponentNode,
-  NodeTypes,
-  VNodeCall
+  NodeTypes
 } from '../../src'
 import { ErrorCodes } from '../../src/errors'
 import { transformModel } from '../../src/transforms/vModel'
@@ -39,11 +40,11 @@ function parseWithVModel(template: string, options: CompilerOptions = {}) {
 }
 
 describe('compiler: transform v-model', () => {
-  test('simple expression', () => {
+  test('simple exprssion', () => {
     const root = parseWithVModel('<input v-model="model" />')
     const node = root.children[0] as ElementNode
-    const props = ((node.codegenNode as VNodeCall).props as ObjectExpression)
-      .properties
+    const props = ((node.codegenNode as CallExpression)
+      .arguments[1] as ObjectExpression).properties
 
     expect(props[0]).toMatchObject({
       key: {
@@ -76,13 +77,13 @@ describe('compiler: transform v-model', () => {
     expect(generate(root).code).toMatchSnapshot()
   })
 
-  test('simple expression (with prefixIdentifiers)', () => {
+  test('simple exprssion (with prefixIdentifiers)', () => {
     const root = parseWithVModel('<input v-model="model" />', {
       prefixIdentifiers: true
     })
     const node = root.children[0] as ElementNode
-    const props = ((node.codegenNode as VNodeCall).props as ObjectExpression)
-      .properties
+    const props = ((node.codegenNode as CallExpression)
+      .arguments[1] as ObjectExpression).properties
 
     expect(props[0]).toMatchObject({
       key: {
@@ -118,8 +119,8 @@ describe('compiler: transform v-model', () => {
   test('compound expression', () => {
     const root = parseWithVModel('<input v-model="model[index]" />')
     const node = root.children[0] as ElementNode
-    const props = ((node.codegenNode as VNodeCall).props as ObjectExpression)
-      .properties
+    const props = ((node.codegenNode as CallExpression)
+      .arguments[1] as ObjectExpression).properties
 
     expect(props[0]).toMatchObject({
       key: {
@@ -157,8 +158,8 @@ describe('compiler: transform v-model', () => {
       prefixIdentifiers: true
     })
     const node = root.children[0] as ElementNode
-    const props = ((node.codegenNode as VNodeCall).props as ObjectExpression)
-      .properties
+    const props = ((node.codegenNode as CallExpression)
+      .arguments[1] as ObjectExpression).properties
 
     expect(props[0]).toMatchObject({
       key: {
@@ -190,19 +191,15 @@ describe('compiler: transform v-model', () => {
         children: [
           '$event => (',
           {
-            children: [
-              {
-                content: '_ctx.model',
-                isStatic: false
-              },
-              '[',
-              {
-                content: '_ctx.index',
-                isStatic: false
-              },
-              ']'
-            ]
+            content: '_ctx.model',
+            isStatic: false
           },
+          '[',
+          {
+            content: '_ctx.index',
+            isStatic: false
+          },
+          ']',
           ' = $event)'
         ]
       }
@@ -214,8 +211,9 @@ describe('compiler: transform v-model', () => {
   test('with argument', () => {
     const root = parseWithVModel('<input v-model:value="model" />')
     const node = root.children[0] as ElementNode
-    const props = ((node.codegenNode as VNodeCall).props as ObjectExpression)
-      .properties
+    const props = ((node.codegenNode as CallExpression)
+      .arguments[1] as ObjectExpression).properties
+
     expect(props[0]).toMatchObject({
       key: {
         content: 'value',
@@ -250,8 +248,8 @@ describe('compiler: transform v-model', () => {
   test('with dynamic argument', () => {
     const root = parseWithVModel('<input v-model:[value]="model" />')
     const node = root.children[0] as ElementNode
-    const props = ((node.codegenNode as VNodeCall).props as ObjectExpression)
-      .properties
+    const props = ((node.codegenNode as CallExpression)
+      .arguments[1] as ObjectExpression).properties
 
     expect(props[0]).toMatchObject({
       key: {
@@ -294,8 +292,8 @@ describe('compiler: transform v-model', () => {
       prefixIdentifiers: true
     })
     const node = root.children[0] as ElementNode
-    const props = ((node.codegenNode as VNodeCall).props as ObjectExpression)
-      .properties
+    const props = ((node.codegenNode as CallExpression)
+      .arguments[1] as ObjectExpression).properties
 
     expect(props[0]).toMatchObject({
       key: {
@@ -340,12 +338,12 @@ describe('compiler: transform v-model', () => {
     })
     expect(root.cached).toBe(1)
     const codegen = (root.children[0] as PlainElementNode)
-      .codegenNode as VNodeCall
+      .codegenNode as PlainElementCodegenNode
     // should not list cached prop in dynamicProps
-    expect(codegen.dynamicProps).toBe(`["modelValue"]`)
-    expect((codegen.props as ObjectExpression).properties[1].value.type).toBe(
-      NodeTypes.JS_CACHE_EXPRESSION
-    )
+    expect(codegen.arguments[4]).toBe(`["modelValue"]`)
+    expect(
+      (codegen.arguments[1] as ObjectExpression).properties[1].value.type
+    ).toBe(NodeTypes.JS_CACHE_EXPRESSION)
   })
 
   test('should not cache update handler if it refers v-for scope variables', () => {
@@ -358,10 +356,10 @@ describe('compiler: transform v-model', () => {
     )
     expect(root.cached).toBe(0)
     const codegen = ((root.children[0] as ForNode)
-      .children[0] as PlainElementNode).codegenNode as VNodeCall
-    expect(codegen.dynamicProps).toBe(`["modelValue", "onUpdate:modelValue"]`)
+      .children[0] as PlainElementNode).codegenNode as PlainElementCodegenNode
+    expect(codegen.arguments[4]).toBe(`["modelValue", "onUpdate:modelValue"]`)
     expect(
-      (codegen.props as ObjectExpression).properties[1].value.type
+      (codegen.arguments[1] as ObjectExpression).properties[1].value.type
     ).not.toBe(NodeTypes.JS_CACHE_EXPRESSION)
   })
 
@@ -373,18 +371,18 @@ describe('compiler: transform v-model', () => {
       }
     )
     const codegen = ((root.children[0] as ComponentNode)
-      .children[0] as PlainElementNode).codegenNode as VNodeCall
-    expect(codegen.dynamicProps).toBe(`["modelValue", "onUpdate:modelValue"]`)
+      .children[0] as PlainElementNode).codegenNode as PlainElementCodegenNode
+    expect(codegen.arguments[4]).toBe(`["modelValue", "onUpdate:modelValue"]`)
   })
 
-  test('should generate modelModifiers for component v-model', () => {
+  test('should generate modelModifers for component v-model', () => {
     const root = parseWithVModel('<Comp v-model.trim.bar-baz="foo" />', {
       prefixIdentifiers: true
     })
-    const vnodeCall = (root.children[0] as ComponentNode)
-      .codegenNode as VNodeCall
+    const args = ((root.children[0] as ComponentNode)
+      .codegenNode as CallExpression).arguments
     // props
-    expect(vnodeCall.props).toMatchObject({
+    expect(args[1]).toMatchObject({
       properties: [
         { key: { content: `modelValue` } },
         { key: { content: `onUpdate:modelValue` } },
@@ -396,20 +394,20 @@ describe('compiler: transform v-model', () => {
     })
     // should NOT include modelModifiers in dynamicPropNames because it's never
     // gonna change
-    expect(vnodeCall.dynamicProps).toBe(`["modelValue", "onUpdate:modelValue"]`)
+    expect(args[4]).toBe(`["modelValue", "onUpdate:modelValue"]`)
   })
 
-  test('should generate modelModifiers for component v-model with arguments', () => {
+  test('should generate modelModifers for component v-model with arguments', () => {
     const root = parseWithVModel(
       '<Comp v-model:foo.trim="foo" v-model:bar.number="bar" />',
       {
         prefixIdentifiers: true
       }
     )
-    const vnodeCall = (root.children[0] as ComponentNode)
-      .codegenNode as VNodeCall
+    const args = ((root.children[0] as ComponentNode)
+      .codegenNode as CallExpression).arguments
     // props
-    expect(vnodeCall.props).toMatchObject({
+    expect(args[1]).toMatchObject({
       properties: [
         { key: { content: `foo` } },
         { key: { content: `onUpdate:foo` } },
@@ -427,9 +425,7 @@ describe('compiler: transform v-model', () => {
     })
     // should NOT include modelModifiers in dynamicPropNames because it's never
     // gonna change
-    expect(vnodeCall.dynamicProps).toBe(
-      `["foo", "onUpdate:foo", "bar", "onUpdate:bar"]`
-    )
+    expect(args[4]).toBe(`["foo", "onUpdate:foo", "bar", "onUpdate:bar"]`)
   })
 
   describe('errors', () => {

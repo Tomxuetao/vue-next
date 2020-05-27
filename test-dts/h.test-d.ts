@@ -1,13 +1,12 @@
-import { expectError, expectAssignable } from 'tsd'
+import { expectError } from 'tsd'
 import {
   describe,
   h,
   defineComponent,
   ref,
   Fragment,
-  Teleport,
-  Suspense,
-  Component
+  Portal,
+  Suspense
 } from './index'
 
 describe('h inference w/ element', () => {
@@ -33,11 +32,11 @@ describe('h inference w/ Fragment', () => {
   expectError(h(Fragment, { key: 123 }, 'bar'))
 })
 
-describe('h inference w/ Teleport', () => {
-  h(Teleport, { to: '#foo' }, 'hello')
-  expectError(h(Teleport))
-  expectError(h(Teleport, {}))
-  expectError(h(Teleport, { to: '#foo' }))
+describe('h inference w/ Portal', () => {
+  h(Portal, { target: '#foo' }, 'hello')
+  expectError(h(Portal))
+  expectError(h(Portal, {}))
+  expectError(h(Portal, { target: '#foo' }))
 })
 
 describe('h inference w/ Suspense', () => {
@@ -59,15 +58,17 @@ describe('h inference w/ functional component', () => {
   expectError(h(Func, { bar: 123 }))
 })
 
-describe('h support w/ plain object component', () => {
+describe('h inference w/ plain object component', () => {
   const Foo = {
     props: {
       foo: String
     }
   }
+
   h(Foo, { foo: 'ok' })
   h(Foo, { foo: 'ok', class: 'extra' })
-  // no inference in this case
+  // should fail on wrong type
+  expectError(h(Foo, { foo: 1 }))
 })
 
 describe('h inference w/ defineComponent', () => {
@@ -120,45 +121,4 @@ describe('h inference w/ defineComponent + direct function', () => {
   expectError(h(Foo, { foo: 'ok' }))
   // should fail on wrong type
   expectError(h(Foo, { bar: 1, foo: 1 }))
-})
-
-// #922
-describe('h support for generic component type', () => {
-  function foo(bar: Component) {
-    h(bar)
-    h(bar, 'hello')
-    h(bar, { id: 'ok' }, 'hello')
-  }
-  foo({})
-})
-
-// #993
-describe('describeComponent extends Component', () => {
-  // functional
-  expectAssignable<Component>(
-    defineComponent((_props: { foo?: string; bar: number }) => {})
-  )
-
-  // typed props
-  expectAssignable<Component>(defineComponent({}))
-
-  // prop arrays
-  expectAssignable<Component>(
-    defineComponent({
-      props: ['a', 'b']
-    })
-  )
-
-  // prop object
-  expectAssignable<Component>(
-    defineComponent({
-      props: {
-        foo: String,
-        bar: {
-          type: Number,
-          required: true
-        }
-      }
-    })
-  )
 })

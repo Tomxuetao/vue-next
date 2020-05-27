@@ -1,5 +1,5 @@
 import path from 'path'
-import { setupPuppeteer, E2E_TIMEOUT } from './e2eUtils'
+import { setupPuppeteer } from './e2eUtils'
 
 declare const globalStats: {
   label: string
@@ -66,19 +66,11 @@ describe('e2e: svg', () => {
     await assertStats(6)
   }
 
-  test(
-    'classic',
-    async () => {
-      await testSvg('classic')
-    },
-    E2E_TIMEOUT
-  )
+  test('classic', async () => {
+    await testSvg('classic')
+  })
 
-  test(
-    'composition',
-    async () => {
-      await testSvg('composition')
-    },
-    E2E_TIMEOUT
-  )
+  test('composition', async () => {
+    await testSvg('composition')
+  })
 })

@@ -6,9 +6,9 @@ import {
   NodeTypes,
   TestElement,
   serialize,
-  serializeInner
+  serializeInner,
+  mockWarn
 } from '@vue/runtime-test'
-import { mockWarn } from '@vue/shared'
 
 mockWarn()
 

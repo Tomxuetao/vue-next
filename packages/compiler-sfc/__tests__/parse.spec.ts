@@ -1,40 +1,23 @@
 import { parse } from '../src'
-import { mockWarn } from '@vue/shared'
+import { mockWarn } from '@vue/runtime-test'
 import { baseParse, baseCompile } from '@vue/compiler-core'
-import { SourceMapConsumer } from 'source-map'
 
 describe('compiler:sfc', () => {
   mockWarn()
 
   describe('source map', () => {
     test('style block', () => {
-      // Padding determines how many blank lines will there be before the style block
-      const padding = Math.round(Math.random() * 10)
-      const style = parse(
-        `${'\n'.repeat(padding)}<style>\n.color {\n color: red;\n }\n</style>\n`
-      ).descriptor.styles[0]
-
+      const style = parse(`<style>\n.color {\n color: red;\n }\n</style>\n`)
+        .descriptor.styles[0]
+      // TODO need to actually test this with SourceMapConsumer
       expect(style.map).not.toBeUndefined()
-
-      const consumer = new SourceMapConsumer(style.map!)
-      consumer.eachMapping(mapping => {
-        expect(mapping.originalLine - mapping.generatedLine).toBe(padding)
-      })
     })
 
     test('script block', () => {
-      // Padding determines how many blank lines will there be before the style block
-      const padding = Math.round(Math.random() * 10)
-      const script = parse(
-        `${'\n'.repeat(padding)}<script>\nconsole.log(1)\n }\n</script>\n`
-      ).descriptor.script
-
+      const script = parse(`<script>\nconsole.log(1)\n }\n</script>\n`)
+        .descriptor.script
+      // TODO need to actually test this with SourceMapConsumer
       expect(script!.map).not.toBeUndefined()
-
-      const consumer = new SourceMapConsumer(script!.map!)
-      consumer.eachMapping(mapping => {
-        expect(mapping.originalLine - mapping.generatedLine).toBe(padding)
-      })
     })
   })
 
@@ -90,29 +73,12 @@ h1 { color: red }
     expect(parse(`<custom/>`).descriptor.customBlocks.length).toBe(0)
   })
 
-  test('handle empty nodes with src attribute', () => {
-    const { descriptor } = parse(`<script src="com"/>`)
-    expect(descriptor.script).toBeTruthy()
-    expect(descriptor.script!.content).toBeFalsy()
-    expect(descriptor.script!.attrs['src']).toBe('com')
-  })
-
   test('nested templates', () => {
     const content = `
     <template v-if="ok">ok</template>
     <div><div></div></div>
     `
     const { descriptor } = parse(`<template>${content}</template>`)
-    expect(descriptor.template!.content).toBe(content)
-  })
-
-  // #1120
-  test('alternative template lang should be treated as plain text', () => {
-    const content = `p(v-if="1 < 2") test`
-    const { descriptor, errors } = parse(
-      `<template lang="pug">` + content + `</template>`
-    )
-    expect(errors.length).toBe(0)
     expect(descriptor.template!.content).toBe(content)
   })
 

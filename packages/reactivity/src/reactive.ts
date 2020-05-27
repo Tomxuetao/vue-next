@@ -1,45 +1,38 @@
-import { isObject, toRawType, def, hasOwn, makeMap } from '@vue/shared'
+import { isObject, toRawType } from '@vue/shared'
 import {
   mutableHandlers,
   readonlyHandlers,
-  shallowReactiveHandlers,
   shallowReadonlyHandlers
 } from './baseHandlers'
 import {
   mutableCollectionHandlers,
-  readonlyCollectionHandlers,
-  shallowCollectionHandlers
+  readonlyCollectionHandlers
 } from './collectionHandlers'
 import { UnwrapRef, Ref } from './ref'
+import { makeMap } from '@vue/shared'
 
-export const enum ReactiveFlags {
-  skip = '__v_skip',
-  isReactive = '__v_isReactive',
-  isReadonly = '__v_isReadonly',
-  raw = '__v_raw',
-  reactive = '__v_reactive',
-  readonly = '__v_readonly'
-}
+// WeakMaps that store {raw <-> observed} pairs.
+const rawToReactive = new WeakMap<any, any>()
+const reactiveToRaw = new WeakMap<any, any>()
+const rawToReadonly = new WeakMap<any, any>()
+const readonlyToRaw = new WeakMap<any, any>()
 
-interface Target {
-  __v_skip?: boolean
-  __v_isReactive?: boolean
-  __v_isReadonly?: boolean
-  __v_raw?: any
-  __v_reactive?: any
-  __v_readonly?: any
-}
+// WeakSets for values that are marked readonly or non-reactive during
+// observable creation.
+const readonlyValues = new WeakSet<any>()
+const nonReactiveValues = new WeakSet<any>()
 
 const collectionTypes = new Set<Function>([Set, Map, WeakMap, WeakSet])
 const isObservableType = /*#__PURE__*/ makeMap(
   'Object,Array,Map,Set,WeakMap,WeakSet'
 )
 
-const canObserve = (value: Target): boolean => {
+const canObserve = (value: any): boolean => {
   return (
-    !value.__v_skip &&
+    !value._isVue &&
+    !value._isVNode &&
     isObservableType(toRawType(value)) &&
-    !Object.isFrozen(value)
+    !nonReactiveValues.has(value)
   )
 }
 
@@ -49,58 +42,59 @@ type UnwrapNestedRefs<T> = T extends Ref ? T : UnwrapRef<T>
 export function reactive<T extends object>(target: T): UnwrapNestedRefs<T>
 export function reactive(target: object) {
   // if trying to observe a readonly proxy, return the readonly version.
-  if (target && (target as Target).__v_isReadonly) {
+  if (readonlyToRaw.has(target)) {
     return target
+  }
+  // target is explicitly marked as readonly by user
+  if (readonlyValues.has(target)) {
+    return readonly(target)
   }
   return createReactiveObject(
     target,
-    false,
+    rawToReactive,
+    reactiveToRaw,
     mutableHandlers,
     mutableCollectionHandlers
-  )
-}
-
-// Return a reactive-copy of the original object, where only the root level
-// properties are reactive, and does NOT unwrap refs nor recursively convert
-// returned properties.
-export function shallowReactive<T extends object>(target: T): T {
-  return createReactiveObject(
-    target,
-    false,
-    shallowReactiveHandlers,
-    shallowCollectionHandlers
   )
 }
 
 export function readonly<T extends object>(
   target: T
 ): Readonly<UnwrapNestedRefs<T>> {
+  // value is a mutable observable, retrieve its original and return
+  // a readonly version.
+  if (reactiveToRaw.has(target)) {
+    target = reactiveToRaw.get(target)
+  }
   return createReactiveObject(
     target,
-    true,
+    rawToReadonly,
+    readonlyToRaw,
     readonlyHandlers,
     readonlyCollectionHandlers
   )
 }
 
+// @internal
 // Return a reactive-copy of the original object, where only the root level
-// properties are readonly, and does NOT unwrap refs nor recursively convert
-// returned properties.
+// properties are readonly, and does not recursively convert returned properties.
 // This is used for creating the props proxy object for stateful components.
 export function shallowReadonly<T extends object>(
   target: T
 ): Readonly<{ [K in keyof T]: UnwrapNestedRefs<T[K]> }> {
   return createReactiveObject(
     target,
-    true,
+    rawToReadonly,
+    readonlyToRaw,
     shallowReadonlyHandlers,
     readonlyCollectionHandlers
   )
 }
 
 function createReactiveObject(
-  target: Target,
-  isReadonly: boolean,
+  target: unknown,
+  toProxy: WeakMap<any, any>,
+  toRaw: WeakMap<any, any>,
   baseHandlers: ProxyHandler<any>,
   collectionHandlers: ProxyHandler<any>
 ) {
@@ -110,53 +104,46 @@ function createReactiveObject(
     }
     return target
   }
-  // target is already a Proxy, return it.
-  // exception: calling readonly() on a reactive object
-  if (target.__v_raw && !(isReadonly && target.__v_isReactive)) {
-    return target
-  }
   // target already has corresponding Proxy
-  if (
-    hasOwn(target, isReadonly ? ReactiveFlags.readonly : ReactiveFlags.reactive)
-  ) {
-    return isReadonly ? target.__v_readonly : target.__v_reactive
+  let observed = toProxy.get(target)
+  if (observed !== void 0) {
+    return observed
+  }
+  // target is already a Proxy
+  if (toRaw.has(target)) {
+    return target
   }
   // only a whitelist of value types can be observed.
   if (!canObserve(target)) {
     return target
   }
-  const observed = new Proxy(
-    target,
-    collectionTypes.has(target.constructor) ? collectionHandlers : baseHandlers
-  )
-  def(
-    target,
-    isReadonly ? ReactiveFlags.readonly : ReactiveFlags.reactive,
-    observed
-  )
+  const handlers = collectionTypes.has(target.constructor)
+    ? collectionHandlers
+    : baseHandlers
+  observed = new Proxy(target, handlers)
+  toProxy.set(target, observed)
+  toRaw.set(observed, target)
   return observed
 }
 
 export function isReactive(value: unknown): boolean {
-  if (isReadonly(value)) {
-    return isReactive((value as Target).__v_raw)
-  }
-  return !!(value && (value as Target).__v_isReactive)
+  return reactiveToRaw.has(value) || readonlyToRaw.has(value)
 }
 
 export function isReadonly(value: unknown): boolean {
-  return !!(value && (value as Target).__v_isReadonly)
-}
-
-export function isProxy(value: unknown): boolean {
-  return isReactive(value) || isReadonly(value)
+  return readonlyToRaw.has(value)
 }
 
 export function toRaw<T>(observed: T): T {
-  return (observed && toRaw((observed as Target).__v_raw)) || observed
+  return reactiveToRaw.get(observed) || readonlyToRaw.get(observed) || observed
 }
 
-export function markRaw<T extends object>(value: T): T {
-  def(value, ReactiveFlags.skip, true)
+export function markReadonly<T>(value: T): T {
+  readonlyValues.add(value)
+  return value
+}
+
+export function markNonReactive<T>(value: T): T {
+  nonReactiveValues.add(value)
   return value
 }

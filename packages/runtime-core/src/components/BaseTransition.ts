@@ -1,6 +1,7 @@
 import {
   getCurrentInstance,
   SetupContext,
+  ComponentOptions,
   ComponentInternalInstance
 } from '../component'
 import {
@@ -8,17 +9,16 @@ import {
   Comment,
   isSameVNodeType,
   VNode,
-  VNodeArrayChildren
+  VNodeChildren
 } from '../vnode'
 import { warn } from '../warning'
 import { isKeepAlive } from './KeepAlive'
 import { toRaw } from '@vue/reactivity'
 import { callWithAsyncErrorHandling, ErrorCodes } from '../errorHandling'
-import { ShapeFlags } from '@vue/shared'
+import { ShapeFlags } from '../shapeFlags'
 import { onBeforeUnmount, onMounted } from '../apiLifecycle'
-import { RendererElement } from '../renderer'
 
-export interface BaseTransitionProps<HostElement = RendererElement> {
+export interface BaseTransitionProps {
   mode?: 'in-out' | 'out-in' | 'default'
   appear?: boolean
 
@@ -32,25 +32,25 @@ export interface BaseTransitionProps<HostElement = RendererElement> {
   // Hooks. Using camel case for easier usage in render functions & JSX.
   // In templates these can be written as @before-enter="xxx" as prop names
   // are camelized.
-  onBeforeEnter?: (el: HostElement) => void
-  onEnter?: (el: HostElement, done: () => void) => void
-  onAfterEnter?: (el: HostElement) => void
-  onEnterCancelled?: (el: HostElement) => void
+  onBeforeEnter?: (el: any) => void
+  onEnter?: (el: any, done: () => void) => void
+  onAfterEnter?: (el: any) => void
+  onEnterCancelled?: (el: any) => void
   // leave
-  onBeforeLeave?: (el: HostElement) => void
-  onLeave?: (el: HostElement, done: () => void) => void
-  onAfterLeave?: (el: HostElement) => void
-  onLeaveCancelled?: (el: HostElement) => void // only fired in persisted mode
+  onBeforeLeave?: (el: any) => void
+  onLeave?: (el: any, done: () => void) => void
+  onAfterLeave?: (el: any) => void
+  onLeaveCancelled?: (el: any) => void // only fired in persisted mode
 }
 
 export interface TransitionHooks {
   persisted: boolean
-  beforeEnter(el: RendererElement): void
-  enter(el: RendererElement): void
-  leave(el: RendererElement, remove: () => void): void
+  beforeEnter(el: object): void
+  enter(el: object): void
+  leave(el: object, remove: () => void): void
   afterLeave?(): void
   delayLeave?(
-    el: RendererElement,
+    el: object,
     earlyRemove: () => void,
     delayedLeave: () => void
   ): void
@@ -75,7 +75,7 @@ export interface TransitionState {
 
 export interface TransitionElement {
   // in persisted mode (e.g. v-show), the same element is toggled, so the
-  // pending enter/leave callbacks may need to be cancelled if the state is toggled
+  // pending enter/leave callbacks may need to cancalled if the state is toggled
   // before it finishes.
   _enterCb?: PendingCallback
   _leaveCb?: PendingCallback
@@ -99,25 +99,6 @@ export function useTransitionState(): TransitionState {
 
 const BaseTransitionImpl = {
   name: `BaseTransition`,
-
-  inheritRef: true,
-
-  props: {
-    mode: String,
-    appear: Boolean,
-    persisted: Boolean,
-    // enter
-    onBeforeEnter: Function,
-    onEnter: Function,
-    onAfterEnter: Function,
-    onEnterCancelled: Function,
-    // leave
-    onBeforeLeave: Function,
-    onLeave: Function,
-    onAfterLeave: Function,
-    onLeaveCancelled: Function
-  },
-
   setup(props: BaseTransitionProps, { slots }: SetupContext) {
     const instance = getCurrentInstance()!
     const state = useTransitionState()
@@ -219,11 +200,29 @@ const BaseTransitionImpl = {
   }
 }
 
+if (__DEV__) {
+  ;(BaseTransitionImpl as ComponentOptions).props = {
+    mode: String,
+    appear: Boolean,
+    persisted: Boolean,
+    // enter
+    onBeforeEnter: Function,
+    onEnter: Function,
+    onAfterEnter: Function,
+    onEnterCancelled: Function,
+    // leave
+    onBeforeLeave: Function,
+    onLeave: Function,
+    onAfterLeave: Function,
+    onLeaveCancelled: Function
+  }
+}
+
 // export the public type for h/tsx inference
 // also to avoid inline import() in generated d.ts files
 export const BaseTransition = (BaseTransitionImpl as any) as {
   new (): {
-    $props: BaseTransitionProps<any>
+    $props: BaseTransitionProps
   }
 }
 
@@ -255,7 +254,7 @@ export function resolveTransitionHooks(
     onLeave,
     onAfterLeave,
     onLeaveCancelled
-  }: BaseTransitionProps<any>,
+  }: BaseTransitionProps,
   state: TransitionState,
   instance: ComponentInternalInstance
 ): TransitionHooks {
@@ -287,10 +286,10 @@ export function resolveTransitionHooks(
       if (
         leavingVNode &&
         isSameVNodeType(vnode, leavingVNode) &&
-        leavingVNode.el!._leaveCb
+        leavingVNode.el._leaveCb
       ) {
         // force early removal (not cancelled)
-        leavingVNode.el!._leaveCb()
+        leavingVNode.el._leaveCb()
       }
       callHook(onBeforeEnter, [el])
     },
@@ -371,7 +370,7 @@ function emptyPlaceholder(vnode: VNode): VNode | undefined {
 function getKeepAliveChild(vnode: VNode): VNode | undefined {
   return isKeepAlive(vnode)
     ? vnode.children
-      ? ((vnode.children as VNodeArrayChildren)[0] as VNode)
+      ? ((vnode.children as VNodeChildren)[0] as VNode)
       : undefined
     : vnode
 }

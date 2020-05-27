@@ -24,12 +24,12 @@
 <script>
 const API_URL = `https://api.github.com/repos/vuejs/vue-next/commits?per_page=3&sha=`
 
-Vue.createApp({
-  data: () => ({
+const App = {
+  data: {
     branches: ['master', 'sync'],
     currentBranch: 'master',
     commits: null
-  }),
+  },
 
   created() {
     this.fetchData()
@@ -55,7 +55,9 @@ Vue.createApp({
       return v.replace(/T|Z/g, ' ')
     }
   }
-}).mount('#demo')
+}
+
+Vue.createApp().mount(App, '#demo')
 </script>
 
 <style>

@@ -11,7 +11,7 @@
 const delay = window.location.hash === '#test' ? 16 : 300
 const { ref, computed } = Vue
 
-Vue.createApp({
+const App = {
   setup() {
     const input = ref('# hello')
     const output = computed(() => marked(input.value, { sanitize: true }))
@@ -23,7 +23,9 @@ Vue.createApp({
       update
     }
   }
-}).mount('#editor')
+}
+
+Vue.createApp().mount(App, '#editor')
 </script>
 
 <style>

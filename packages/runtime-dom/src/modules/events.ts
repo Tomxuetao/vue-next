@@ -1,4 +1,4 @@
-import { EMPTY_OBJ, isArray } from '@vue/shared'
+import { EMPTY_OBJ } from '@vue/shared'
 import {
   ComponentInternalInstance,
   callWithAsyncErrorHandling
@@ -24,7 +24,7 @@ type EventValueWithOptions = {
 let _getNow: () => number = Date.now
 
 // Determine what event timestamp the browser is using. Annoyingly, the
-// timestamp can either be hi-res (relative to page load) or low-res
+// timestamp can either be hi-res ( relative to page load) or low-res
 // (relative to UNIX epoch), so in order to compare time we have to use the
 // same timestamp type when saving the flush timestamp.
 if (
@@ -66,12 +66,11 @@ export function removeEventListener(
 
 export function patchEvent(
   el: Element,
-  rawName: string,
+  name: string,
   prevValue: EventValueWithOptions | EventValue | null,
   nextValue: EventValueWithOptions | EventValue | null,
   instance: ComponentInternalInstance | null = null
 ) {
-  const name = rawName.slice(2).toLowerCase()
   const prevOptions = prevValue && 'options' in prevValue && prevValue.options
   const nextOptions = nextValue && 'options' in nextValue && nextValue.options
   const invoker = prevValue && prevValue.invoker
@@ -130,7 +129,7 @@ function createInvoker(
     // AFTER it was attached.
     if (e.timeStamp >= invoker.lastUpdated - 1) {
       callWithAsyncErrorHandling(
-        patchStopImmediatePropagation(e, invoker.value),
+        invoker.value,
         instance,
         ErrorCodes.NATIVE_EVENT_HANDLER,
         [e]
@@ -141,20 +140,4 @@ function createInvoker(
   initialValue.invoker = invoker
   invoker.lastUpdated = getNow()
   return invoker
-}
-
-function patchStopImmediatePropagation(
-  e: Event,
-  value: EventValue
-): EventValue {
-  if (isArray(value)) {
-    const originalStop = e.stopImmediatePropagation
-    e.stopImmediatePropagation = () => {
-      originalStop.call(e)
-      ;(e as any)._stopped = true
-    }
-    return value.map(fn => (e: Event) => !(e as any)._stopped && fn(e))
-  } else {
-    return value
-  }
 }
